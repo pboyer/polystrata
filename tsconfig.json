@@ -1,0 +1,15 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "strict": true,
+    "noUncheckedIndexedAccess": true,
+    "skipLibCheck": true,
+    "noEmit": true,
+    "rootDir": ".",
+    "types": ["vitest/globals"]
+  },
+  "include": ["src/**/*.ts", "test/**/*.ts", "demo/**/*.ts", "bench/**/*.ts"]
+}

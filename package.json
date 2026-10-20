@@ -1,0 +1,29 @@
+{
+  "name": "polystrata",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Fast, robust 2D straight-line B-rep and Boolean kernel in Rust/WASM and TypeScript",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "dev": "vite",
+    "build:wasm": "cargo build --manifest-path crates/polystrata-wasm/Cargo.toml --target wasm32-unknown-unknown --release && node -e \"const fs=require('fs');const b=fs.readFileSync('crates/polystrata-wasm/target/wasm32-unknown-unknown/release/polystrata_wasm.wasm');fs.writeFileSync('src/wasm-bytes.ts','// Auto-generated from crates/polystrata-wasm\\nexport const WASM_BASE64 = \\\"'+b.toString('base64')+'\\\";\\n');\"",
+    "build": "vite build",
+    "preview": "vite preview",
+    "bench": "tsx bench/run.ts",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.5",
+    "@velipso/polybool": "^2.0.11",
+    "clipper2-js": "^1.2.4",
+    "martinez-polygon-clipping": "^0.7.3",
+    "polygon-clipping": "^0.15.7",
+    "tsx": "^4.23.15",
+    "typescript": "^5.6.3",
+    "vitest": "^2.1.8"
+  }
+}
