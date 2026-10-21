@@ -12,7 +12,7 @@ keywords = [
     "polygon-clipping",
     "boolean-operations",
     "geometry",
-    "computational-geometry",
+    "polygon",
     "cad",
 ]
 categories = ["algorithms", "mathematics", "graphics", "science", "wasm"]

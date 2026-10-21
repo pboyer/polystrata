@@ -1,10 +1,10 @@
 # polystrata
 
-**[Interactive Demo & Fuzzer](https://polystrata.ptrbyr.com)** &bull; **[Live Browser Benchmark Suite](https://polystrata.ptrbyr.com/benchmark)** &bull; **[npm](https://www.npmjs.com/package/polystrata)** &bull; **[crates.io](https://crates.io/crates/polystrata)**
+**[Interactive Demo & Fuzzer](https://polystrata.ptrbyr.com)** &bull; **[Live Browser Benchmark Suite](https://polystrata.ptrbyr.com/benchmark)** &bull; **[npm](https://www.npmjs.com/package/polystrata)** &bull; **[crates.io](https://crates.io/crates/polystrata)** &bull; **[docs.rs](https://docs.rs/polystrata)**
 
 Polystrata is a high-performance, topologically robust 2D polygon clipping library implemented in Rust and available in JS via WebAssembly. To my knowledge, it is simultaneously the fastest AND the most robust polygon clipping library available for JS. It will consume low quality, self-intersecting input while still producing predictable results.
 
-- **Zero dependencies**, self-contained dual ESM + CommonJS build (~53 KB gzipped, including embedded WASM) and native Rust crate (`polystrata`).
+- **Zero dependencies**, self-contained dual ESM + CommonJS build (~53 KB gzipped, including embedded WASM) and native Rust crate ([`polystrata` on crates.io](https://crates.io/crates/polystrata)).
 - **2.0x–3.1x faster than `clipper2-js`** and **6x–22x faster than `polygon-clipping`** across CAD, high-intersection scaling, and adversarial fuzz workloads while preserving native IEEE-754 `Float64` coordinates (no integer grid quantization).
 - **100% pass rate** across 1,000+ adversarial degenerate polygon pairs (self-intersecting bowties, shared collinear walls, T-junctions, 0.08° shallow-angle crossings, and 1.5 × 10⁶ coordinate offsets with 10⁻⁵ micro-slivers).
 - **Flexible inputs**: accepts `{ x, y }[]` loops, `[x, y][]` coordinate tuples, GeoJSON `Polygon` / `MultiPolygon`, `PolygonWithHoles2D`, `Float64Array` / `Float32Array` flat buffers, or raw `Segment2D[]` segment soups.
@@ -13,12 +13,12 @@ Polystrata is a high-performance, topologically robust 2D polygon clipping libra
 
 ## Installation
 
-**JavaScript / TypeScript (npm):**
+**JavaScript / TypeScript ([npm](https://www.npmjs.com/package/polystrata)):**
 ```bash
 npm install polystrata
 ```
 
-**Rust (Cargo):**
+**Rust ([crates.io](https://crates.io/crates/polystrata) / [docs.rs](https://docs.rs/polystrata)):**
 ```bash
 cargo add polystrata
 ```
