@@ -4,6 +4,14 @@
   "type": "module",
   "license": "MIT",
   "description": "High-performance 2D polygon clipping, Boolean operations, and topological healing kernel powered by Rust/WebAssembly",
+  "homepage": "https://polystrata.ptrbyr.com",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/pboyer/polystrata.git"
+  },
+  "bugs": {
+    "url": "https://github.com/pboyer/polystrata/issues"
+  },
   "keywords": [
     "polygon-clipping",
     "polygon-boolean",

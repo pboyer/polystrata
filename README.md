@@ -1,6 +1,8 @@
 # polystrata
 
-High-performance, topologically robust 2D polygon clipping, Boolean operations, and B-rep healing kernel powered by **Rust + WebAssembly SIMD**.
+**[Interactive Demo & Fuzzer](https://polystrata.ptrbyr.com)** &bull; **[Live Browser Benchmark Suite](https://polystrata.ptrbyr.com/benchmark)** &bull; **[npm](https://www.npmjs.com/package/polystrata)**
+
+Polystrata is a high-performance, topologically robust 2D polygon clipping library implemented in Rust and available in JS via WebAssembly. To my knowledge, it is simultaneously the fastest AND the most robust polygon clipping library available for JS. It will consume low quality, self-intersecting input while still producing predictable results.
 
 - **Zero dependencies**, self-contained dual ESM + CommonJS build (~53 KB gzipped, including embedded WASM).
 - **2.0x–3.1x faster than `clipper2-js`** and **6x–22x faster than `polygon-clipping`** across CAD, high-intersection scaling, and adversarial fuzz workloads while preserving native IEEE-754 `Float64` coordinates (no integer grid quantization).

@@ -200,6 +200,9 @@
             &larr; Interactive Kernel Lab &amp; Fuzzer
           </a>
           <span class="mode-tab active">JS Clipping Benchmark Suite</span>
+          <a href="https://github.com/pboyer/polystrata" target="_blank" rel="noopener noreferrer" class="mode-tab" style="text-decoration: none; display: inline-flex; align-items: center;">
+            GitHub &#8599;
+          </a>
         </div>
       </header>
 
@@ -222,10 +225,10 @@
         <section class="bench-grid-section">
           <h2>Adversarial Fuzz Torture Benchmark (120 Degenerate Polygon Pairs &times; 4 Ops = 480 Boolean Ops)</h2>
           <p class="sub">
-            Tests random self-intersecting bowties, near-collinear edges, coincident vertices (\(10^{-10}\) jitter),
+            Tests random self-intersecting bowties, near-collinear edges, coincident vertices (10<sup>-10</sup> jitter),
             and verifies exact Boolean Inclusion-Exclusion Area Identities:
-            \(\text{Area}(A \cup B) + \text{Area}(A \cap B) = \text{Area}(A) + \text{Area}(B)\) and
-            \(\text{Area}(A \setminus B) + \text{Area}(A \cap B) = \text{Area}(A)\).
+            <code>Area(A &cup; B) + Area(A &cap; B) = Area(A) + Area(B)</code> and
+            <code>Area(A \ B) + Area(A &cap; B) = Area(A)</code>.
           </p>
           <table class="bench-table">
             <thead>
