@@ -7,10 +7,10 @@ import {
   type Loop2D,
   type Point2D,
   type Segment2D,
+  signedLoopArea,
   union,
   xor,
 } from "../src/index.js";
-import { signedLoopArea } from "../src/tolerance.js";
 
 /** Deterministic PRNG (xorshift32) for reproducible fuzz testing. */
 class Prng {

@@ -1,18 +1,14 @@
-import { KernelArena } from "../src/arena.js";
 import {
-  applyWindingRule,
   type CycleDiagnostic,
-  classifyAndExtract,
-} from "../src/classify.js";
-import { type ConsolidatedComplex, consolidateComplex } from "../src/consolidate.js";
-import type { KernelResult, Loop2D, Point2D, WindingRule } from "../src/index.js";
-import {
-  denormalizePoint,
-  type NormalizedContext,
-  normalizeInputs,
+  initPolystrata,
+  inspectPipeline,
+  type KernelResult,
+  type Loop2D,
+  type PipelineInspection,
+  type Point2D,
   signedLoopArea,
-} from "../src/tolerance.js";
-import { buildPlanarTopology, type PlanarTopology } from "../src/topology.js";
+  type WindingRule,
+} from "../src/index.js";
 import {
   DEMO_SCENARIOS,
   type DemoOp,
@@ -29,9 +25,7 @@ import {
 } from "./fuzzer.js";
 
 interface PipelineRunSnapshot {
-  ctx: NormalizedContext;
-  complex: ConsolidatedComplex;
-  topology: PlanarTopology;
+  inspection: PipelineInspection;
   diagnostics: CycleDiagnostic[];
   result: KernelResult;
   elapsedMs: number;
@@ -126,6 +120,18 @@ function screenToWorld(sx: number, sy: number): { x: number; y: number } {
   };
 }
 
+function applyWindingRule(w: number, rule: WindingRule): boolean {
+  const wi = Math.round(w);
+  switch (rule) {
+    case "positive":
+      return wi > 0;
+    case "nonZero":
+      return wi !== 0;
+    case "evenOdd":
+      return (wi & 1) !== 0;
+  }
+}
+
 function buildPredicate(op: DemoOp, rule: WindingRule): (w: ReadonlyArray<number>) => boolean {
   switch (op) {
     case "heal":
@@ -150,44 +156,31 @@ function buildPredicate(op: DemoOp, rule: WindingRule): (w: ReadonlyArray<number
   }
 }
 
-const demoArena = new KernelArena();
-
 function runPipeline(): PipelineRunSnapshot {
-  const inputs: { shape: ReturnType<typeof editableBodyToShapeInput>; bodyIndex: number }[] = [
-    { shape: editableBodyToShapeInput(bodyA), bodyIndex: 0 },
-    { shape: editableBodyToShapeInput(bodyB), bodyIndex: 1 },
-    { shape: editableBodyToShapeInput(bodyC), bodyIndex: 2 },
+  const inputs = [
+    editableBodyToShapeInput(bodyA),
+    editableBodyToShapeInput(bodyB),
+    editableBodyToShapeInput(bodyC),
   ];
 
-  const t0 = performance.now();
-  const normCtx = normalizeInputs(inputs, customSnapTolerance ?? undefined, demoArena);
-  const complex = consolidateComplex(normCtx);
-  const topology = buildPlanarTopology(complex);
-  const diagnostics: CycleDiagnostic[] = [];
   const predicate = buildPredicate(currentOp, currentWindingRule);
-
-  const result =
-    normCtx.segmentCount > 0
-      ? classifyAndExtract(
-          complex,
-          topology,
-          predicate,
-          normCtx.cx,
-          normCtx.cy,
-          simplifyCollinear,
-          diagnostics,
-        )
-      : { polygons: [], loops: [] };
-
+  const t0 = performance.now();
+  const inspection = inspectPipeline(inputs, predicate, {
+    snapTolerance: customSnapTolerance ?? undefined,
+    simplifyCollinear,
+    windingRule: currentWindingRule,
+  });
   const elapsedMs = performance.now() - t0;
+
+  const { complex, diagnostics, result } = inspection;
 
   let activeVertexCount = 0;
   for (let v = 0; v < complex.vertexCount; v++) {
-    if (complex.arena.vAlive[v]) activeVertexCount++;
+    if (complex.vAlive[v]) activeVertexCount++;
   }
   let activeEdgeCount = 0;
   for (let e = 0; e < complex.edgeCount; e++) {
-    if (complex.arena.eAlive[e]) activeEdgeCount++;
+    if (complex.eAlive[e]) activeEdgeCount++;
   }
 
   let totalArea = 0;
@@ -196,9 +189,7 @@ function runPipeline(): PipelineRunSnapshot {
   }
 
   return {
-    ctx: normCtx,
-    complex,
-    topology,
+    inspection,
     diagnostics,
     result,
     elapsedMs,
@@ -331,16 +322,17 @@ function updateMetricsAndDiagnostics(snap: PipelineRunSnapshot): void {
     `${snap.result.polygons.length} (${holeCount} holes)`;
   document.getElementById("metric-area")!.textContent = snap.totalArea.toFixed(2);
 
+  const { normalization, cycleCount } = snap.inspection;
   const diagEl = document.getElementById("pipeline-diagnostics")!;
   const keptCycles = snap.diagnostics.filter((d) => d.keep).length;
   diagEl.innerHTML = `
-    <div class="diag-row"><span>Centering Offset C:</span><span class="diag-val">(${snap.ctx.cx.toFixed(1)}, ${snap.ctx.cy.toFixed(1)})</span></div>
-    <div class="diag-row"><span>BBox Diagonal L:</span><span class="diag-val">${snap.ctx.diagonal.toFixed(3)}</span></div>
-    <div class="diag-row"><span>Baseline Tol r₀:</span><span class="diag-val">${snap.complex.r0.toExponential(2)}</span></div>
-    <div class="diag-row"><span>Max Radius Cap r_max:</span><span class="diag-val">${snap.complex.rMax.toExponential(2)}</span></div>
-    <div class="diag-row"><span>Raw Input Segments:</span><span class="diag-val">${snap.ctx.segmentCount}</span></div>
+    <div class="diag-row"><span>Centering Offset C:</span><span class="diag-val">(${normalization.cx.toFixed(1)}, ${normalization.cy.toFixed(1)})</span></div>
+    <div class="diag-row"><span>BBox Diagonal L:</span><span class="diag-val">${normalization.diagonal.toFixed(3)}</span></div>
+    <div class="diag-row"><span>Baseline Tol r₀:</span><span class="diag-val">${normalization.r0.toExponential(2)}</span></div>
+    <div class="diag-row"><span>Max Radius Cap r_max:</span><span class="diag-val">${normalization.rMax.toExponential(2)}</span></div>
+    <div class="diag-row"><span>Raw Input Segments:</span><span class="diag-val">${normalization.segmentCount}</span></div>
     <div class="diag-row"><span>Active Verts / Edges:</span><span class="diag-val">${snap.activeVertexCount} / ${snap.activeEdgeCount}</span></div>
-    <div class="diag-row"><span>Planar Half-Edge Cycles:</span><span class="diag-val">${snap.topology.cycleCount} (${keptCycles} kept)</span></div>
+    <div class="diag-row"><span>Planar Half-Edge Cycles:</span><span class="diag-val">${cycleCount} (${keptCycles} kept)</span></div>
     <div class="diag-row"><span>Output Outer Shells:</span><span class="diag-val">${snap.result.polygons.length}</span></div>
     <div class="diag-row"><span>Output Interior Holes:</span><span class="diag-val">${holeCount}</span></div>
   `;
@@ -471,16 +463,17 @@ function drawEditableBody(body: EditableBody, strokeColor: string, fillColor: st
 }
 
 function drawConsolidatedComplex(snap: PipelineRunSnapshot): void {
-  const { complex, ctx } = snap;
-  const { arena, vertexCount, edgeCount, bodyCount } = complex;
+  const { complex, normalization } = snap.inspection;
+  const { vertexCount, edgeCount, bodyCount, vx, vy, vr, vAlive, ev0, ev1, eAlive, eDeltaW } =
+    complex;
+  const { cx, cy } = normalization;
   ctx2d.save();
 
   if (showLayerRadii) {
     for (let v = 0; v < vertexCount; v++) {
-      if (!arena.vAlive[v]) continue;
-      const wp = denormalizePoint({ x: arena.vx[v]!, y: arena.vy[v]! }, ctx.cx, ctx.cy);
-      const s = worldToScreen(wp.x, wp.y);
-      const radiusPx = Math.max(4, arena.vr[v]! * view.scale);
+      if (!vAlive[v]) continue;
+      const s = worldToScreen(vx[v]! + cx, vy[v]! + cy);
+      const radiusPx = Math.max(4, vr[v]! * view.scale);
       ctx2d.beginPath();
       ctx2d.arc(s.x, s.y, radiusPx, 0, Math.PI * 2);
       ctx2d.fillStyle = "rgba(250, 204, 21, 0.14)";
@@ -494,18 +487,16 @@ function drawConsolidatedComplex(snap: PipelineRunSnapshot): void {
   if (showLayerConsolidated) {
     ctx2d.font = "10px 'JetBrains Mono', monospace";
     for (let e = 0; e < edgeCount; e++) {
-      if (!arena.eAlive[e]) continue;
-      const u = arena.ev0[e]!;
-      const v = arena.ev1[e]!;
-      const v0 = denormalizePoint({ x: arena.vx[u]!, y: arena.vy[u]! }, ctx.cx, ctx.cy);
-      const v1 = denormalizePoint({ x: arena.vx[v]!, y: arena.vy[v]! }, ctx.cx, ctx.cy);
-      const s0 = worldToScreen(v0.x, v0.y);
-      const s1 = worldToScreen(v1.x, v1.y);
+      if (!eAlive[e]) continue;
+      const u = ev0[e]!;
+      const v = ev1[e]!;
+      const s0 = worldToScreen(vx[u]! + cx, vy[u]! + cy);
+      const s1 = worldToScreen(vx[v]! + cx, vy[v]! + cy);
 
       const base = e * bodyCount;
       let nonZeroDelta = false;
       for (let b = 0; b < bodyCount; b++) {
-        if (arena.eDeltaW[base + b] !== 0) {
+        if (eDeltaW[base + b] !== 0) {
           nonZeroDelta = true;
           break;
         }
@@ -520,8 +511,8 @@ function drawConsolidatedComplex(snap: PipelineRunSnapshot): void {
       const mx = 0.5 * (s0.x + s1.x);
       const my = 0.5 * (s0.y + s1.y);
       if (Math.hypot(s1.x - s0.x, s1.y - s0.y) > 28) {
-        const d0 = arena.eDeltaW[base] ?? 0;
-        const d1 = bodyCount > 1 ? (arena.eDeltaW[base + 1] ?? 0) : 0;
+        const d0 = eDeltaW[base] ?? 0;
+        const d1 = bodyCount > 1 ? (eDeltaW[base + 1] ?? 0) : 0;
         const label = bodyCount > 1 ? `Δw=[${d0},${d1}]` : `Δw=[${d0}]`;
         ctx2d.fillStyle = "#f472b6";
         ctx2d.fillText(label, mx + 3, my - 3);
@@ -1261,5 +1252,7 @@ function initUI(): void {
   });
 }
 
-initUI();
-loadScenario(DEMO_SCENARIOS[0]!);
+void initPolystrata().then(() => {
+  initUI();
+  loadScenario(DEMO_SCENARIOS[0]!);
+});

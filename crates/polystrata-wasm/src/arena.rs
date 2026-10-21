@@ -5,27 +5,20 @@ pub struct KernelArena {
     pub raw_segments: Vec<f64>,
     pub raw_count: usize,
 
-    // Prepared normalized buffers for repeated benchmark runs
+    // Prepared normalized buffers
     pub prep_x0: Vec<f64>,
     pub prep_y0: Vec<f64>,
     pub prep_x1: Vec<f64>,
     pub prep_y1: Vec<f64>,
-    pub prep_body: Vec<u8>,
+    pub prep_body: Vec<u32>,
     pub prep_count: usize,
     pub prep_cx: f64,
     pub prep_cy: f64,
+    pub prep_diagonal: f64,
     pub prep_r0: f64,
     pub prep_rmax: f64,
     pub prep_cell_size: f64,
     pub prep_body_count: usize,
-
-    // Working normalized segments for current run
-    pub norm_x0: Vec<f64>,
-    pub norm_y0: Vec<f64>,
-    pub norm_x1: Vec<f64>,
-    pub norm_y1: Vec<f64>,
-    pub norm_body: Vec<u8>,
-    pub norm_count: usize,
 
     // Stage 1-2: Vertices (SoA)
     pub vertex_count: usize,
@@ -98,6 +91,9 @@ pub struct KernelArena {
     pub cycle_keep: Vec<u8>,
     pub cycle_visited: Vec<u8>,
     pub cycle_windings: Vec<i32>,
+    pub cycle_windings_f64: Vec<f64>,
+    pub cycle_sample_x: Vec<f64>,
+    pub cycle_sample_y: Vec<f64>,
     pub vertex_net_winding: Vec<i32>,
     pub index_in_stack: Vec<i32>,
     pub bfs_queue: Vec<u32>,
@@ -111,7 +107,7 @@ pub struct KernelArena {
 
     // Flat output buffers read directly by JS
     pub out_coords: Vec<f64>,
-    pub out_loop_meta: Vec<u32>, // 3 u32s per loop: [start_pt_idx, pt_count, parent_shell_idx_or_u32_max]
+    pub out_loop_meta: Vec<u32>, // 3 u32s per loop: [start_pt_idx, pt_count, is_outer]
     pub out_loop_count: usize,
     pub out_total_area: f64,
 }
@@ -129,16 +125,11 @@ impl KernelArena {
             prep_count: 0,
             prep_cx: 0.0,
             prep_cy: 0.0,
+            prep_diagonal: 0.0,
             prep_r0: 1e-9,
             prep_rmax: 4e-9,
             prep_cell_size: 1.0,
-            prep_body_count: 2,
-            norm_x0: Vec::with_capacity(2048),
-            norm_y0: Vec::with_capacity(2048),
-            norm_x1: Vec::with_capacity(2048),
-            norm_y1: Vec::with_capacity(2048),
-            norm_body: Vec::with_capacity(2048),
-            norm_count: 0,
+            prep_body_count: 1,
 
             vertex_count: 0,
             vx: Vec::with_capacity(2048),
@@ -204,6 +195,9 @@ impl KernelArena {
             cycle_keep: Vec::with_capacity(1024),
             cycle_visited: Vec::with_capacity(1024),
             cycle_windings: Vec::with_capacity(2048),
+            cycle_windings_f64: Vec::with_capacity(2048),
+            cycle_sample_x: Vec::with_capacity(1024),
+            cycle_sample_y: Vec::with_capacity(1024),
             vertex_net_winding: Vec::with_capacity(4096),
             index_in_stack: vec![-1; 2048],
             bfs_queue: Vec::with_capacity(1024),
@@ -319,6 +313,8 @@ impl KernelArena {
             self.cycle_len.resize(cap, 0);
             self.cycle_keep.resize(cap, 0);
             self.cycle_visited.resize(cap, 0);
+            self.cycle_sample_x.resize(cap, 0.0);
+            self.cycle_sample_y.resize(cap, 0.0);
         }
         let needed_cw = self.cycle_start.len() * body_count;
         if needed_cw > self.cycle_windings.len() {
@@ -327,6 +323,7 @@ impl KernelArena {
                 cw_cap <<= 1;
             }
             self.cycle_windings.resize(cw_cap, 0);
+            self.cycle_windings_f64.resize(cw_cap, 0.0);
         }
     }
 }

@@ -423,23 +423,48 @@ fn evaluate_winding_numbers(px: f64, py: f64, arena: &KernelArena, out_windings:
     }
 }
 
-/// Op codes: 0 = Union, 1 = Intersect, 2 = Difference, 3 = Xor, 4 = Heal
+#[inline]
+fn apply_rule(w: f64, rule_code: u32) -> bool {
+    match rule_code {
+        0 => w >= 0.5,
+        1 => w.abs() >= 0.5,
+        _ => (w.round() as i64).abs() % 2 == 1,
+    }
+}
+
+/// Op codes:
+/// 0 = Union, 1 = Intersect, 2 = Difference, 3 = Xor, 4 = Heal,
+/// 5 = UnionAll (any body in 0..body_count), 6 = IntersectAll (all bodies in 0..body_count)
 /// Rule codes: 0 = Positive, 1 = NonZero, 2 = EvenOdd
 #[inline]
-fn eval_predicate(w0: f64, w1: f64, op_code: u32, rule_code: u32) -> bool {
-    let in_a = match rule_code {
-        0 => w0 >= 0.5,
-        1 => w0.abs() >= 0.5,
-        _ => (w0.round() as i64).abs() % 2 == 1,
-    };
+fn eval_predicate(windings: &[f64], body_count: usize, op_code: u32, rule_code: u32) -> bool {
+    if op_code == 5 {
+        for &w in &windings[..body_count] {
+            if apply_rule(w, rule_code) {
+                return true;
+            }
+        }
+        return false;
+    }
+    if op_code == 6 {
+        if body_count == 0 {
+            return false;
+        }
+        for &w in &windings[..body_count] {
+            if !apply_rule(w, rule_code) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    let w0 = windings[0];
+    let in_a = apply_rule(w0, rule_code);
     if op_code == 4 {
         return in_a;
     }
-    let in_b = match rule_code {
-        0 => w1 >= 0.5,
-        1 => w1.abs() >= 0.5,
-        _ => (w1.round() as i64).abs() % 2 == 1,
-    };
+    let w1 = if body_count > 1 { windings[1] } else { 0.0 };
+    let in_b = apply_rule(w1, rule_code);
     match op_code {
         0 => in_a || in_b,
         1 => in_a && in_b,
@@ -560,9 +585,148 @@ pub fn classify_and_extract(
     let vertex_count = arena.vertex_count;
     let edge_count = arena.edge_count;
     let cycle_count = arena.cycle_count;
-    let half_edge_count = edge_count * 2;
     let body_count = arena.prep_body_count;
-    let r0 = arena.prep_r0;
+
+    if edge_count == 0 || cycle_count == 0 {
+        return;
+    }
+
+    arena.active_edge_ids.clear();
+    let needed_net_w = vertex_count * body_count;
+    if arena.vertex_net_winding.len() < needed_net_w {
+        arena.vertex_net_winding.resize(needed_net_w.max(1024) * 2, 0);
+    }
+    arena.vertex_net_winding[..needed_net_w].fill(0);
+
+    for i in 0..edge_count {
+        if arena.e_alive[i] == 0 {
+            continue;
+        }
+        arena.active_edge_ids.push(i as u32);
+        let u = arena.ev0[i] as usize;
+        let v = arena.ev1[i] as usize;
+        let base0 = u * body_count;
+        let base1 = v * body_count;
+        let e_base = i * body_count;
+        for b in 0..body_count {
+            let dw = arena.e_delta_w[e_base + b];
+            arena.vertex_net_winding[base0 + b] -= dw;
+            arena.vertex_net_winding[base1 + b] += dw;
+        }
+    }
+
+    if arena.active_edge_ids.is_empty() {
+        return;
+    }
+
+    let mut is_closed_chain = true;
+    for i in 0..needed_net_w {
+        if arena.vertex_net_winding[i] != 0 {
+            is_closed_chain = false;
+            break;
+        }
+    }
+
+    let mut w_scratch = vec![0.0f64; body_count];
+
+    if is_closed_chain {
+        arena.cycle_visited[..cycle_count].fill(0);
+
+        for start_cid in 0..cycle_count {
+            if arena.cycle_visited[start_cid] != 0 {
+                continue;
+            }
+
+            let (sx, sy) = pick_cycle_sample_point(start_cid, arena);
+            evaluate_winding_numbers(sx, sy, arena, &mut w_scratch);
+
+            arena.cycle_visited[start_cid] = 1;
+            let base_start = start_cid * body_count;
+            for b in 0..body_count {
+                let w_int = w_scratch[b].round() as i32;
+                arena.cycle_windings[base_start + b] = w_int;
+                w_scratch[b] = w_int as f64;
+            }
+            arena.cycle_keep[start_cid] =
+                if eval_predicate(&w_scratch, body_count, op_code, rule_code) {
+                    1
+                } else {
+                    0
+                };
+
+            arena.bfs_queue.clear();
+            arena.bfs_queue.push(start_cid as u32);
+            let mut head = 0usize;
+
+            while head < arena.bfs_queue.len() {
+                let curr_cid = arena.bfs_queue[head] as usize;
+                head += 1;
+                let curr_base = curr_cid * body_count;
+                let c_start = arena.cycle_start[curr_cid] as usize;
+                let c_len = arena.cycle_len[curr_cid] as usize;
+
+                for i in 0..c_len {
+                    let he_id = arena.cycle_half_edges_csr[c_start + i];
+                    let next_cid_i32 = arena.he_cycle[(he_id ^ 1) as usize];
+                    if next_cid_i32 < 0 {
+                        continue;
+                    }
+                    let next_cid = next_cid_i32 as usize;
+                    if arena.cycle_visited[next_cid] != 0 {
+                        continue;
+                    }
+
+                    arena.cycle_visited[next_cid] = 1;
+                    let e_base = ((he_id >> 1) as usize) * body_count;
+                    let step_sign: i32 = if (he_id & 1) == 0 { -1 } else { 1 };
+                    let next_base = next_cid * body_count;
+
+                    for b in 0..body_count {
+                        let nw =
+                            arena.cycle_windings[curr_base + b] + step_sign * arena.e_delta_w[e_base + b];
+                        arena.cycle_windings[next_base + b] = nw;
+                        w_scratch[b] = nw as f64;
+                    }
+                    arena.cycle_keep[next_cid] =
+                        if eval_predicate(&w_scratch, body_count, op_code, rule_code) {
+                            1
+                        } else {
+                            0
+                        };
+                    arena.bfs_queue.push(next_cid as u32);
+                }
+            }
+        }
+    } else {
+        for c_id in 0..cycle_count {
+            let (sx, sy) = pick_cycle_sample_point(c_id, arena);
+            evaluate_winding_numbers_subtended_angle(sx, sy, arena, &mut w_scratch);
+            arena.cycle_keep[c_id] =
+                if eval_predicate(&w_scratch, body_count, op_code, rule_code) {
+                    1
+                } else {
+                    0
+                };
+        }
+    }
+
+    // 2. Algebraic boundary extraction + spoke relinking + pinch decomposition
+    extract_from_cycle_keep(arena, simplify_collinear);
+}
+
+/// Compute `arena.cycle_windings_f64` (and `cycle_sample_x`/`cycle_sample_y` in world coordinates
+/// when `capture_samples` is true) for all cycles `0..arena.cycle_count` so a custom JS predicate
+/// (`booleanMulti` or `inspectPipeline`) can populate `arena.cycle_keep[0..cycle_count]`.
+pub fn compute_cycles_and_windings(arena: &mut KernelArena, capture_samples: bool) {
+    arena.out_coords.clear();
+    arena.out_loop_meta.clear();
+    arena.out_loop_count = 0;
+    arena.out_total_area = 0.0;
+
+    let vertex_count = arena.vertex_count;
+    let edge_count = arena.edge_count;
+    let cycle_count = arena.cycle_count;
+    let body_count = arena.prep_body_count;
     let cx = arena.prep_cx;
     let cy = arena.prep_cy;
 
@@ -606,7 +770,7 @@ pub fn classify_and_extract(
         }
     }
 
-    let mut w_scratch = [0.0f64; 16];
+    let mut w_scratch = vec![0.0f64; body_count];
 
     if is_closed_chain {
         arena.cycle_visited[..cycle_count].fill(0);
@@ -617,6 +781,10 @@ pub fn classify_and_extract(
             }
 
             let (sx, sy) = pick_cycle_sample_point(start_cid, arena);
+            if capture_samples {
+                arena.cycle_sample_x[start_cid] = sx + cx;
+                arena.cycle_sample_y[start_cid] = sy + cy;
+            }
             evaluate_winding_numbers(sx, sy, arena, &mut w_scratch);
 
             arena.cycle_visited[start_cid] = 1;
@@ -624,12 +792,8 @@ pub fn classify_and_extract(
             for b in 0..body_count {
                 let w_int = w_scratch[b].round() as i32;
                 arena.cycle_windings[base_start + b] = w_int;
-                w_scratch[b] = w_int as f64;
+                arena.cycle_windings_f64[base_start + b] = w_int as f64;
             }
-            let w0 = w_scratch[0];
-            let w1 = if body_count > 1 { w_scratch[1] } else { 0.0 };
-            arena.cycle_keep[start_cid] =
-                if eval_predicate(w0, w1, op_code, rule_code) { 1 } else { 0 };
 
             arena.bfs_queue.clear();
             arena.bfs_queue.push(start_cid as u32);
@@ -654,6 +818,11 @@ pub fn classify_and_extract(
                     }
 
                     arena.cycle_visited[next_cid] = 1;
+                    if capture_samples {
+                        let (nsx, nsy) = pick_cycle_sample_point(next_cid, arena);
+                        arena.cycle_sample_x[next_cid] = nsx + cx;
+                        arena.cycle_sample_y[next_cid] = nsy + cy;
+                    }
                     let e_base = ((he_id >> 1) as usize) * body_count;
                     let step_sign: i32 = if (he_id & 1) == 0 { -1 } else { 1 };
                     let next_base = next_cid * body_count;
@@ -662,12 +831,8 @@ pub fn classify_and_extract(
                         let nw =
                             arena.cycle_windings[curr_base + b] + step_sign * arena.e_delta_w[e_base + b];
                         arena.cycle_windings[next_base + b] = nw;
-                        w_scratch[b] = nw as f64;
+                        arena.cycle_windings_f64[next_base + b] = nw as f64;
                     }
-                    let nw0 = w_scratch[0];
-                    let nw1 = if body_count > 1 { w_scratch[1] } else { 0.0 };
-                    arena.cycle_keep[next_cid] =
-                        if eval_predicate(nw0, nw1, op_code, rule_code) { 1 } else { 0 };
                     arena.bfs_queue.push(next_cid as u32);
                 }
             }
@@ -675,12 +840,37 @@ pub fn classify_and_extract(
     } else {
         for c_id in 0..cycle_count {
             let (sx, sy) = pick_cycle_sample_point(c_id, arena);
+            if capture_samples {
+                arena.cycle_sample_x[c_id] = sx + cx;
+                arena.cycle_sample_y[c_id] = sy + cy;
+            }
             evaluate_winding_numbers_subtended_angle(sx, sy, arena, &mut w_scratch);
-            let w0 = w_scratch[0];
-            let w1 = if body_count > 1 { w_scratch[1] } else { 0.0 };
-            arena.cycle_keep[c_id] =
-                if eval_predicate(w0, w1, op_code, rule_code) { 1 } else { 0 };
+            let base = c_id * body_count;
+            for b in 0..body_count {
+                arena.cycle_windings_f64[base + b] = w_scratch[b];
+            }
         }
+    }
+}
+
+/// Extract surviving boundary half-edges, relink spokes, decompose pinch vertices, and write
+/// cleaned world loops directly into `arena.out_coords` and `arena.out_loop_meta` from `arena.cycle_keep`.
+pub fn extract_from_cycle_keep(arena: &mut KernelArena, simplify_collinear: bool) {
+    arena.out_coords.clear();
+    arena.out_loop_meta.clear();
+    arena.out_loop_count = 0;
+    arena.out_total_area = 0.0;
+
+    let vertex_count = arena.vertex_count;
+    let edge_count = arena.edge_count;
+    let cycle_count = arena.cycle_count;
+    let half_edge_count = edge_count * 2;
+    let r0 = arena.prep_r0;
+    let cx = arena.prep_cx;
+    let cy = arena.prep_cy;
+
+    if edge_count == 0 || cycle_count == 0 || arena.active_edge_ids.is_empty() {
+        return;
     }
 
     // 2. Algebraic boundary extraction

@@ -610,7 +610,6 @@ fn apply_edge_splits(arena: &mut KernelArena, body_count: usize, mark_step_dirty
     let mut sort_t: [f64; 64] = [0.0; 64];
     let mut sort_v: [u32; 64] = [0; 64];
     let mut chain_v: [u32; 66] = [0; 66];
-    let mut dw_scratch: [i32; 16] = [0; 16];
 
     for idx in 0..num_split_edges {
         let edge_id = arena.split_edge_list[idx] as usize;
@@ -670,9 +669,6 @@ fn apply_edge_splits(arena: &mut KernelArena, body_count: usize, mark_step_dirty
         any_split = true;
 
         let base = edge_id * body_count;
-        for b in 0..body_count {
-            dw_scratch[b] = arena.e_delta_w[base + b];
-        }
 
         for i in 0..(chain_len - 1) {
             let u = chain_v[i];
@@ -694,7 +690,7 @@ fn apply_edge_splits(arena: &mut KernelArena, body_count: usize, mark_step_dirty
 
             let new_base = new_id * body_count;
             for b in 0..body_count {
-                arena.e_delta_w[new_base + b] = dw_scratch[b];
+                arena.e_delta_w[new_base + b] = arena.e_delta_w[base + b];
             }
             update_edge_bounds(arena, new_id);
             let new_id_u32 = new_id as u32;
@@ -746,6 +742,7 @@ pub fn prepare_normalized_segments(arena: &mut KernelArena, seg_count: usize, us
     if seg_count == 0 {
         arena.prep_cx = 0.0;
         arena.prep_cy = 0.0;
+        arena.prep_diagonal = 0.0;
         arena.prep_r0 = 1e-9;
         arena.prep_rmax = 2e-9;
         arena.prep_cell_size = 1.0;
@@ -806,7 +803,7 @@ pub fn prepare_normalized_segments(arena: &mut KernelArena, seg_count: usize, us
         let y0 = arena.raw_segments[base + 1] - cy;
         let x1 = arena.raw_segments[base + 2] - cx;
         let y1 = arena.raw_segments[base + 3] - cy;
-        let b = arena.raw_segments[base + 4] as u8;
+        let b = arena.raw_segments[base + 4] as u32;
         arena.prep_x0[i] = x0;
         arena.prep_y0[i] = y0;
         arena.prep_x1[i] = x1;
@@ -835,6 +832,7 @@ pub fn prepare_normalized_segments(arena: &mut KernelArena, seg_count: usize, us
 
     arena.prep_cx = cx;
     arena.prep_cy = cy;
+    arena.prep_diagonal = diagonal;
     arena.prep_r0 = r0;
     arena.prep_rmax = r_max;
     arena.prep_cell_size = cell_size;

@@ -6,7 +6,6 @@ import {
 import { initPolystrataWasm } from "../src/index.js";
 
 const LIB_COLORS: Record<string, string> = {
-  "polystrata-wasm": "#22d3ee",
   polystrata: "#38bdf8",
   "clipper2-js": "#a78bfa",
   "polygon-clipping": "#34d399",

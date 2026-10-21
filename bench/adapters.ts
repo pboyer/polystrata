@@ -3,17 +3,12 @@ import { Clipper, FillRule, Path64, Paths64, Point64 } from "clipper2-js";
 import * as martinez from "martinez-polygon-clipping";
 import polygonClipping from "polygon-clipping";
 import {
-  difference,
-  intersect,
-  type KernelResult,
   type Loop2D,
   type Point2D,
-  prepareWasmBooleanTask,
-  union,
+  prepareBooleanTask,
+  signedLoopArea,
   type WasmPathsResult,
-  xor,
 } from "../src/index.js";
-import { signedLoopArea } from "../src/tolerance.js";
 import type { BenchOp } from "./workloads.js";
 
 export interface PreparedTask {
@@ -156,12 +151,12 @@ function polyBoolPolygonArea(poly: PolyBoolPolygon): number {
 
 export const LIBRARY_ADAPTERS: LibraryAdapter[] = [
   {
-    id: "polystrata-wasm",
-    name: "polystrata (Rust/WASM)",
+    id: "polystrata",
+    name: "polystrata",
     version: "0.1.0",
     algorithm: "4-Stage Snapped B-Rep + 1D Sweep + Rust/WASM SIMD",
     prepare: (subject, clip) => {
-      const wasmTask = prepareWasmBooleanTask(subject, clip);
+      const wasmTask = prepareBooleanTask(subject, clip);
       return {
         run: (op) => {
           switch (op) {
@@ -176,39 +171,6 @@ export const LIBRARY_ADAPTERS: LibraryAdapter[] = [
           }
         },
         computeArea: (res) => (res as WasmPathsResult).totalArea,
-      };
-    },
-  },
-
-  {
-    id: "polystrata",
-    name: "polystrata (Pure TS)",
-    version: "0.1.0",
-    algorithm: "4-Stage Snapped B-Rep + 1D Sweep + SoA TypedArrays",
-    prepare: (subject, clip) => {
-      const subCopy = subject.map((l) => l.map((p) => ({ x: p.x, y: p.y })));
-      const clipCopy = clip.map((l) => l.map((p) => ({ x: p.x, y: p.y })));
-      return {
-        run: (op) => {
-          switch (op) {
-            case "union":
-              return union(subCopy, clipCopy);
-            case "intersect":
-              return intersect(subCopy, clipCopy);
-            case "difference":
-              return difference(subCopy, clipCopy);
-            case "xor":
-              return xor(subCopy, clipCopy);
-          }
-        },
-        computeArea: (res) => {
-          const r = res as KernelResult;
-          let area = 0;
-          for (const loop of r.loops) {
-            area += signedLoopArea(loop);
-          }
-          return area;
-        },
       };
     },
   },

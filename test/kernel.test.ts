@@ -1,23 +1,30 @@
 import { describe, expect, it } from "vitest";
 import {
   booleanMulti,
+  clip,
   difference,
   differenceWasm,
+  type GeoJSONPolygon,
   heal,
   healWasm,
   intersect,
+  intersectAll,
   intersectWasm,
   type KernelResult,
   type Loop2D,
   type Point2D,
   type PolygonWithHoles2D,
   type Segment2D,
+  signedLoopArea,
+  toGeoJSON,
+  toTupleMultiPolygon,
+  type TupleLoop2D,
   union,
+  unionAll,
   unionWasm,
   xor,
   xorWasm,
 } from "../src/index.js";
-import { signedLoopArea } from "../src/tolerance.js";
 
 function totalSignedArea(res: KernelResult): number {
   let area = 0;
@@ -373,5 +380,82 @@ describe("2D Straight-Line B-Rep Kernel - Deterministic Edge & Torture Cases", (
     expect(totalSignedArea(differenceWasm(a, b))).toBeCloseTo(totalSignedArea(difference(a, b)), 6);
     expect(totalSignedArea(xorWasm(a, b))).toBeCloseTo(totalSignedArea(xor(a, b)), 6);
     expect(totalSignedArea(healWasm([a, b]))).toBeCloseTo(totalSignedArea(heal([a, b])), 6);
+  });
+
+  it("supports [x, y] coordinate tuples, GeoJSON Polygon/MultiPolygon, and toGeoJSON/toTupleMultiPolygon", () => {
+    // Closed GeoJSON-style tuple ring with duplicate closing vertex
+    const tupleA: TupleLoop2D = [
+      [0, 0],
+      [20, 0],
+      [20, 20],
+      [0, 20],
+      [0, 0],
+    ];
+    // GeoJSON Polygon with an outer ring (even if CW!) and an interior hole ring
+    const geoB: GeoJSONPolygon = {
+      type: "Polygon",
+      coordinates: [
+        [
+          [10, 0],
+          [10, 20],
+          [30, 20],
+          [30, 0],
+          [10, 0],
+        ],
+        [
+          [22, 5],
+          [28, 5],
+          [28, 15],
+          [22, 15],
+          [22, 5],
+        ],
+      ],
+    };
+
+    const res = union(tupleA, geoB);
+    // 30x20 outer = 600 minus 6x10 hole = 60 -> 540
+    expect(totalSignedArea(res)).toBeCloseTo(540, 5);
+    expect(res.polygons.length).toBe(1);
+    expect(res.polygons[0]!.holes.length).toBe(1);
+
+    const geoOut = toGeoJSON(res);
+    expect(geoOut.type).toBe("MultiPolygon");
+    expect(geoOut.coordinates.length).toBe(1);
+    expect(geoOut.coordinates[0]!.length).toBe(2); // outer + 1 hole
+    // Closed ring has first === last
+    const outerRing = geoOut.coordinates[0]![0]!;
+    expect(outerRing[0]).toEqual(outerRing[outerRing.length - 1]);
+
+    const unclosedTuples = toTupleMultiPolygon(res, false);
+    expect(unclosedTuples[0]![0]!.length).toBe(outerRing.length - 1);
+  });
+
+  it("supports flat Float64Array loops, unionAll, intersectAll, and clip dispatcher across >20 bodies", () => {
+    const flatA = new Float64Array([0, 0, 10, 0, 10, 10, 0, 10]);
+    const flatB = new Float64Array([5, 0, 15, 0, 15, 10, 5, 10]);
+    expect(signedLoopArea(flatA)).toBeCloseTo(100, 6);
+
+    expect(totalSignedArea(clip("union", flatA, flatB))).toBeCloseTo(150, 5);
+    expect(totalSignedArea(clip("intersect", flatA, flatB))).toBeCloseTo(50, 5);
+    expect(totalSignedArea(clip("difference", flatA, flatB))).toBeCloseTo(50, 5);
+    expect(totalSignedArea(clip("xor", flatA, flatB))).toBeCloseTo(100, 5);
+
+    // 25 overlapping 2x10 vertical strips spaced by dx=1 -> total width = 26, height = 10 -> area = 260
+    const strips: Loop2D[] = [];
+    for (let i = 0; i < 25; i++) {
+      strips.push(makeBox(i, 0, i + 2, 10));
+    }
+    const uAll = unionAll(strips);
+    expect(totalSignedArea(uAll)).toBeCloseTo(260, 5);
+    const uAllEvenOdd = unionAll(strips, { windingRule: "evenOdd" });
+    expect(totalSignedArea(uAllEvenOdd)).toBeCloseTo(260, 5);
+
+    // IntersectAll of 3 overlapping boxes: [0,10]x[0,10], [2,12]x[0,10], [4,14]x[0,10] -> [4,10]x[0,10] = 60
+    const iAll = intersectAll([
+      makeBox(0, 0, 10, 10),
+      makeBox(2, 0, 12, 10),
+      makeBox(4, 0, 14, 10),
+    ]);
+    expect(totalSignedArea(iAll)).toBeCloseTo(60, 5);
   });
 });

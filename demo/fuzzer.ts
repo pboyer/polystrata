@@ -6,10 +6,10 @@ import {
   type Loop2D,
   type Point2D,
   type Segment2D,
+  signedLoopArea,
   union,
   xor,
 } from "../src/index.js";
-import { signedLoopArea } from "../src/tolerance.js";
 
 export class Prng {
   private state: number;

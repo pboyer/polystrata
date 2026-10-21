@@ -1,6 +1,5 @@
 import { Prng } from "../demo/fuzzer.js";
-import { heal, type Loop2D } from "../src/index.js";
-import { signedLoopArea } from "../src/tolerance.js";
+import { heal, type Loop2D, signedLoopArea } from "../src/index.js";
 import { LIBRARY_ADAPTERS, type LibraryAdapter } from "./adapters.js";
 import { type BenchOp, type BenchWorkload, createBenchmarkWorkloads } from "./workloads.js";
 
