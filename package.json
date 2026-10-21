@@ -53,7 +53,7 @@
   },
   "scripts": {
     "dev": "vite",
-    "build:wasm": "cargo build --manifest-path crates/polystrata-wasm/Cargo.toml --target wasm32-unknown-unknown --release && node -e \"const fs=require('fs');const b=fs.readFileSync('crates/polystrata-wasm/target/wasm32-unknown-unknown/release/polystrata_wasm.wasm');fs.writeFileSync('src/wasm-bytes.ts','// Auto-generated from crates/polystrata-wasm\\nexport const WASM_BASE64: string = \\\"'+b.toString('base64')+'\\\";\\n');\"",
+    "build:wasm": "cargo build --target wasm32-unknown-unknown --release && node -e \"const fs=require('fs');const b=fs.readFileSync('target/wasm32-unknown-unknown/release/polystrata.wasm');fs.writeFileSync('src/wasm-bytes.ts','// Auto-generated from crates/polystrata-wasm\\nexport const WASM_BASE64: string = \\\"'+b.toString('base64')+'\\\";\\n');\"",
     "build": "vite build --config vite.lib.config.ts && tsc -p tsconfig.build.json && node -e \"require('fs').copyFileSync('dist/index.d.ts','dist/index.d.cts')\"",
     "build:demo": "vite build",
     "preview": "vite preview",

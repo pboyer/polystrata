@@ -112,6 +112,12 @@ pub struct KernelArena {
     pub out_total_area: f64,
 }
 
+impl Default for KernelArena {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl KernelArena {
     pub fn new() -> Self {
         Self {

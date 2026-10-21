@@ -3,5 +3,5 @@
 version = 4
 
 [[package]]
-name = "polystrata-wasm"
+name = "polystrata"
 version = "0.1.0"
