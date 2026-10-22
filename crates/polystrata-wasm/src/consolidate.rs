@@ -16,48 +16,19 @@ pub fn resolve_canonical_vertex(parents: &mut [u32], v: u32) -> u32 {
 }
 
 #[inline]
-fn project_point_to_segment_t(
-    px: f64,
-    py: f64,
-    ax: f64,
-    ay: f64,
-    bx: f64,
-    by: f64,
-    tol: f64,
-) -> f64 {
-    let dx = bx - ax;
-    let dy = by - ay;
-    let len_sq = dx * dx + dy * dy;
-    if len_sq == 0.0 {
-        return -1.0;
-    }
-    let t = ((px - ax) * dx + (py - ay) * dy) / len_sq;
-    if t <= 0.0 || t >= 1.0 {
-        return -1.0;
-    }
-    let ex = px - (ax + t * dx);
-    let ey = py - (ay + t * dy);
-    if ex * ex + ey * ey <= tol * tol {
-        t
-    } else {
-        -1.0
-    }
-}
-
-#[inline]
+#[allow(clippy::too_many_arguments)]
 fn intersect_segments_interior_fast(
     ax: f64,
     ay: f64,
-    bx: f64,
-    by: f64,
+    rx: f64,
+    ry: f64,
+    len_r_sq: f64,
     cx: f64,
     cy: f64,
     dx: f64,
     dy: f64,
     r0: f64,
 ) -> Option<(f64, f64, f64, f64)> {
-    let rx = bx - ax;
-    let ry = by - ay;
     let sx = dx - cx;
     let sy = dy - cy;
     let denom = rx * sy - ry * sx;
@@ -67,34 +38,41 @@ fn intersect_segments_interior_fast(
 
     let qpx = cx - ax;
     let qpy = cy - ay;
-    let inv_denom = 1.0 / denom;
-    let s_raw = (qpx * sy - qpy * sx) * inv_denom;
-    if s_raw < -0.5 || s_raw > 1.5 {
+    let half_denom = 0.5 * denom;
+    let half_abs = 0.5 * denom.abs();
+    let ds_num = (qpx * sy - qpy * sx - half_denom).abs() - half_abs;
+    if ds_num > half_abs {
         return None;
     }
-    let t_raw = (qpx * ry - qpy * rx) * inv_denom;
-    if t_raw < -0.5 || t_raw > 1.5 {
+    let dt_num = (qpx * ry - qpy * rx - half_denom).abs() - half_abs;
+    if dt_num > half_abs {
         return None;
     }
 
-    let len_r_sq = rx * rx + ry * ry;
     let len_s_sq = sx * sx + sy * sy;
     let len_scale_sq = len_r_sq * len_s_sq;
-    if len_scale_sq == 0.0 || denom * denom <= 1e-30 * len_scale_sq {
+    let denom_sq = denom * denom;
+    if len_scale_sq == 0.0 || denom_sq <= 1e-30 * len_scale_sq {
         return None;
     }
 
-    if s_raw > 0.0 && s_raw < 1.0 && t_raw > 0.0 && t_raw < 1.0 {
+    if ds_num < 0.0 && dt_num < 0.0 {
+        let inv_denom = 1.0 / denom;
+        let s_raw = (qpx * sy - qpy * sx) * inv_denom;
+        let t_raw = (qpx * ry - qpy * rx) * inv_denom;
         let hx = ax + 0.5 * (s_raw * rx + (qpx + t_raw * sx));
         let hy = ay + 0.5 * (s_raw * ry + (qpy + t_raw * sy));
         return Some((s_raw, t_raw, hx, hy));
     }
 
-    let len_r = len_r_sq.sqrt();
-    let len_s = len_s_sq.sqrt();
-    let s_slack = r0 / len_r;
-    let t_slack = r0 / len_s;
-    if s_raw > -s_slack && s_raw < 1.0 + s_slack && t_raw > -t_slack && t_raw < 1.0 + t_slack {
+    let r0_sq = r0 * r0;
+    let r0_denom_sq = r0_sq * denom_sq;
+    if (ds_num <= 0.0 || ds_num * ds_num * len_r_sq < r0_denom_sq)
+        && (dt_num <= 0.0 || dt_num * dt_num * len_s_sq < r0_denom_sq)
+    {
+        let inv_denom = 1.0 / denom;
+        let s_raw = (qpx * sy - qpy * sx) * inv_denom;
+        let t_raw = (qpx * ry - qpy * rx) * inv_denom;
         let s = s_raw.clamp(1e-7, 1.0 - 1e-7);
         let t = t_raw.clamp(1e-7, 1.0 - 1e-7);
         let px = ax + s * rx;
@@ -103,7 +81,7 @@ fn intersect_segments_interior_fast(
         let qy = cy + t * sy;
         let ddx = px - qx;
         let ddy = py - qy;
-        if ddx * ddx + ddy * ddy <= r0 * r0 {
+        if ddx * ddx + ddy * ddy <= r0_sq {
             return Some((s, t, 0.5 * (px + qx), 0.5 * (py + qy)));
         }
     }
@@ -200,6 +178,25 @@ fn link_incident_edge(arena: &mut KernelArena, v_id: u32, e_id: u32) {
 }
 
 #[inline]
+fn has_coincident_incident_edge(arena: &KernelArena, v0: u32, v1: u32) -> bool {
+    let mut node = arena.v_first_inc[v0 as usize];
+    while node != -1 {
+        let nu = node as usize;
+        let other_id = arena.inc_edge[nu] as usize;
+        node = arena.inc_next[nu];
+        if arena.e_alive[other_id] == 0 {
+            continue;
+        }
+        let ov0 = arena.ev0[other_id];
+        let ov1 = arena.ev1[other_id];
+        if (ov0 == v0 && ov1 == v1) || (ov0 == v1 && ov1 == v0) {
+            return true;
+        }
+    }
+    false
+}
+
+#[inline]
 fn create_edge_single_body(
     arena: &mut KernelArena,
     v0: u32,
@@ -211,6 +208,12 @@ fn create_edge_single_body(
     if id >= arena.ev0.len() || (id + 1) * body_count > arena.e_delta_w.len() {
         arena.ensure_edge_capacity(id + 1, body_count);
     }
+    let need_zero = if arena.v_first_inc[v0 as usize] != -1 && arena.v_first_inc[v1 as usize] != -1
+    {
+        has_coincident_incident_edge(arena, v0, v1)
+    } else {
+        false
+    };
     arena.edge_count = id + 1;
     arena.ev0[id] = v0;
     arena.ev1[id] = v1;
@@ -225,11 +228,35 @@ fn create_edge_single_body(
     }
     arena.e_delta_w[base + body_index] = 1;
 
-    update_edge_bounds(arena, id);
+    let u = v0 as usize;
+    let v = v1 as usize;
+    let x0 = arena.vx[u];
+    let y0 = arena.vy[u];
+    let x1 = arena.vx[v];
+    let y1 = arena.vy[v];
+    arena.e_min_x[id] = x0.min(x1);
+    arena.e_min_y[id] = y0.min(y1);
+    arena.e_max_x[id] = x0.max(x1);
+    arena.e_max_y[id] = y0.max(y1);
+
+    let dx = x1 - x0;
+    let dy = y1 - y0;
+    let rad_sum = arena.vr[u] + arena.vr[v];
+    let is_short = dx * dx + dy * dy <= rad_sum * rad_sum;
+
     let eid_u32 = id as u32;
     link_incident_edge(arena, v0, eid_u32);
     link_incident_edge(arena, v1, eid_u32);
-    mark_edge_dirty(arena, eid_u32);
+    if need_zero
+        || is_short
+        || arena.in_zero_v_queue[u] != 0
+        || arena.in_zero_v_queue[v] != 0
+    {
+        mark_edge_dirty(arena, eid_u32);
+    } else {
+        arena.in_step_e_queue[id] = 1;
+        arena.step_e_queue.push(eid_u32);
+    }
     eid_u32
 }
 
@@ -575,15 +602,8 @@ fn record_split(arena: &mut KernelArena, edge_id: u32, t: f64, vertex_id: u32) {
     let head = arena.edge_split_head[eu];
     if head == -1 {
         arena.split_edge_list.push(edge_id);
-    } else {
-        let mut cur = head;
-        while cur != -1 {
-            let cu = cur as usize;
-            if arena.split_vert[cu] == vertex_id {
-                return;
-            }
-            cur = arena.split_next[cu];
-        }
+    } else if arena.split_vert[head as usize] == vertex_id {
+        return;
     }
 
     let s_idx = arena.split_count;
@@ -607,10 +627,6 @@ fn apply_edge_splits(arena: &mut KernelArena, body_count: usize, mark_step_dirty
     }
     let mut any_split = false;
 
-    let mut sort_t: [f64; 64] = [0.0; 64];
-    let mut sort_v: [u32; 64] = [0; 64];
-    let mut chain_v: [u32; 66] = [0; 66];
-
     for idx in 0..num_split_edges {
         let edge_id = arena.split_edge_list[idx] as usize;
         let mut head = arena.edge_split_head[edge_id];
@@ -619,48 +635,50 @@ fn apply_edge_splits(arena: &mut KernelArena, body_count: usize, mark_step_dirty
             continue;
         }
 
-        let mut count = 0usize;
-        while head != -1 && count < 64 {
+        arena.split_scratch.clear();
+        while head != -1 {
             let hu = head as usize;
-            let t_val = arena.split_t[hu];
-            let v_val = arena.split_vert[hu];
-            let mut pos = count;
-            while pos > 0 && sort_t[pos - 1] > t_val {
-                sort_t[pos] = sort_t[pos - 1];
-                sort_v[pos] = sort_v[pos - 1];
-                pos -= 1;
-            }
-            sort_t[pos] = t_val;
-            sort_v[pos] = v_val;
-            count += 1;
+            arena
+                .split_scratch
+                .push((arena.split_t[hu], arena.split_vert[hu]));
             head = arena.split_next[hu];
+        }
+
+        let count = arena.split_scratch.len();
+        if count <= 24 {
+            for i in 1..count {
+                let item = arena.split_scratch[i];
+                let mut pos = i;
+                while pos > 0 && arena.split_scratch[pos - 1].0 > item.0 {
+                    arena.split_scratch[pos] = arena.split_scratch[pos - 1];
+                    pos -= 1;
+                }
+                arena.split_scratch[pos] = item;
+            }
+        } else {
+            arena.split_scratch.sort_unstable_by(|a, b| {
+                a.0.partial_cmp(&b.0).unwrap_or(core::cmp::Ordering::Equal)
+            });
         }
 
         let start_v = arena.ev0[edge_id];
         let end_v = arena.ev1[edge_id];
-        chain_v[0] = start_v;
-        let mut chain_len = 1usize;
+        arena.chain_scratch.clear();
+        arena.chain_scratch.push(start_v);
 
         for i in 0..count {
-            let vid = resolve_canonical_vertex(&mut arena.v_parent, sort_v[i]);
-            if vid == end_v || vid == chain_v[chain_len - 1] {
+            let raw_v = arena.split_scratch[i].1;
+            let vid = resolve_canonical_vertex(&mut arena.v_parent, raw_v);
+            if vid == end_v || vid == *arena.chain_scratch.last().unwrap() {
                 continue;
             }
-            let mut dup = false;
-            for j in 0..chain_len {
-                if chain_v[j] == vid {
-                    dup = true;
-                    break;
-                }
-            }
-            if !dup {
-                chain_v[chain_len] = vid;
-                chain_len += 1;
+            if !arena.chain_scratch.contains(&vid) {
+                arena.chain_scratch.push(vid);
             }
         }
-        chain_v[chain_len] = end_v;
-        chain_len += 1;
+        arena.chain_scratch.push(end_v);
 
+        let chain_len = arena.chain_scratch.len();
         if chain_len <= 2 {
             continue;
         }
@@ -671,8 +689,8 @@ fn apply_edge_splits(arena: &mut KernelArena, body_count: usize, mark_step_dirty
         let base = edge_id * body_count;
 
         for i in 0..(chain_len - 1) {
-            let u = chain_v[i];
-            let v = chain_v[i + 1];
+            let u = arena.chain_scratch[i];
+            let v = arena.chain_scratch[i + 1];
             if u == v {
                 continue;
             }
@@ -680,6 +698,15 @@ fn apply_edge_splits(arena: &mut KernelArena, body_count: usize, mark_step_dirty
             if new_id >= arena.ev0.len() || (new_id + 1) * body_count > arena.e_delta_w.len() {
                 arena.ensure_edge_capacity(new_id + 1, body_count);
             }
+            let need_zero = if !mark_step_dirty {
+                if arena.v_first_inc[u as usize] != -1 && arena.v_first_inc[v as usize] != -1 {
+                    has_coincident_incident_edge(arena, u, v)
+                } else {
+                    false
+                }
+            } else {
+                true
+            };
             arena.edge_count = new_id + 1;
             arena.ev0[new_id] = u;
             arena.ev1[new_id] = v;
@@ -692,15 +719,37 @@ fn apply_edge_splits(arena: &mut KernelArena, body_count: usize, mark_step_dirty
             for b in 0..body_count {
                 arena.e_delta_w[new_base + b] = arena.e_delta_w[base + b];
             }
-            update_edge_bounds(arena, new_id);
+            let uu = u as usize;
+            let vu = v as usize;
+            let x0 = arena.vx[uu];
+            let y0 = arena.vy[uu];
+            let x1 = arena.vx[vu];
+            let y1 = arena.vy[vu];
+            arena.e_min_x[new_id] = x0.min(x1);
+            arena.e_min_y[new_id] = y0.min(y1);
+            arena.e_max_x[new_id] = x0.max(x1);
+            arena.e_max_y[new_id] = y0.max(y1);
+
             let new_id_u32 = new_id as u32;
             link_incident_edge(arena, u, new_id_u32);
             link_incident_edge(arena, v, new_id_u32);
             if mark_step_dirty {
                 mark_edge_dirty(arena, new_id_u32);
-            } else if arena.in_zero_e_queue[new_id] == 0 {
-                arena.in_zero_e_queue[new_id] = 1;
-                arena.zero_e_queue.push(new_id_u32);
+            } else {
+                let dx = x1 - x0;
+                let dy = y1 - y0;
+                let rad_sum = arena.vr[uu] + arena.vr[vu];
+                let is_short = dx * dx + dy * dy <= rad_sum * rad_sum;
+                if need_zero
+                    || is_short
+                    || arena.in_zero_v_queue[uu] != 0
+                    || arena.in_zero_v_queue[vu] != 0
+                {
+                    if arena.in_zero_e_queue[new_id] == 0 {
+                        arena.in_zero_e_queue[new_id] = 1;
+                        arena.zero_e_queue.push(new_id_u32);
+                    }
+                }
             }
         }
     }
@@ -708,6 +757,35 @@ fn apply_edge_splits(arena: &mut KernelArena, body_count: usize, mark_step_dirty
     arena.split_count = 0;
     arena.split_edge_list.clear();
     any_split
+}
+
+fn populate_sorted_edge_bounds(arena: &mut KernelArena, count: usize) {
+    for i in 0..count {
+        let eu = unsafe { *arena.sorted_edges.get_unchecked(i) } as usize;
+        unsafe {
+            *arena.se_min_x.get_unchecked_mut(i) = *arena.e_min_x.get_unchecked(eu);
+            *arena.se_min_y.get_unchecked_mut(i) = *arena.e_min_y.get_unchecked(eu);
+            *arena.se_max_y.get_unchecked_mut(i) = *arena.e_max_y.get_unchecked(eu);
+            let v0 = *arena.ev0.get_unchecked(eu);
+            let v1 = *arena.ev1.get_unchecked(eu);
+            *arena.se_v0.get_unchecked_mut(i) = v0;
+            *arena.se_v1.get_unchecked_mut(i) = v1;
+            *arena.se_x0.get_unchecked_mut(i) = *arena.vx.get_unchecked(v0 as usize);
+            *arena.se_y0.get_unchecked_mut(i) = *arena.vy.get_unchecked(v0 as usize);
+            *arena.se_x1.get_unchecked_mut(i) = *arena.vx.get_unchecked(v1 as usize);
+            *arena.se_y1.get_unchecked_mut(i) = *arena.vy.get_unchecked(v1 as usize);
+        }
+    }
+}
+
+fn populate_sorted_vert_coords(arena: &mut KernelArena, count: usize) {
+    for i in 0..count {
+        let vu = unsafe { *arena.sorted_verts.get_unchecked(i) } as usize;
+        unsafe {
+            *arena.sv_x.get_unchecked_mut(i) = *arena.vx.get_unchecked(vu);
+            *arena.sv_y.get_unchecked_mut(i) = *arena.vy.get_unchecked(vu);
+        }
+    }
 }
 
 fn build_sorted_active_edges(arena: &mut KernelArena) -> usize {
@@ -720,6 +798,32 @@ fn build_sorted_active_edges(arena: &mut KernelArena) -> usize {
         }
     }
     sort_indices_by_f64(&mut arena.sorted_edges[..count], &arena.e_min_x);
+    populate_sorted_edge_bounds(arena, count);
+    count
+}
+
+fn build_sorted_active_edges_in_box(
+    arena: &mut KernelArena,
+    min_x: f64,
+    max_x: f64,
+    min_y: f64,
+    max_y: f64,
+) -> usize {
+    let total_edges = arena.edge_count;
+    let mut count = 0usize;
+    for e_id in 0..total_edges {
+        if arena.e_alive[e_id] != 0
+            && arena.e_max_x[e_id] >= min_x
+            && arena.e_min_x[e_id] <= max_x
+            && arena.e_max_y[e_id] >= min_y
+            && arena.e_min_y[e_id] <= max_y
+        {
+            arena.sorted_edges[count] = e_id as u32;
+            count += 1;
+        }
+    }
+    sort_indices_by_f64(&mut arena.sorted_edges[..count], &arena.e_min_x);
+    populate_sorted_edge_bounds(arena, count);
     count
 }
 
@@ -733,6 +837,31 @@ fn build_sorted_active_verts(arena: &mut KernelArena) -> usize {
         }
     }
     sort_indices_by_f64(&mut arena.sorted_verts[..count], &arena.vx);
+    populate_sorted_vert_coords(arena, count);
+    count
+}
+
+fn build_sorted_active_verts_in_box(
+    arena: &mut KernelArena,
+    min_x: f64,
+    max_x: f64,
+    min_y: f64,
+    max_y: f64,
+) -> usize {
+    let total_verts = arena.vertex_count;
+    let mut count = 0usize;
+    for v_id in 0..total_verts {
+        if arena.v_alive[v_id] != 0 {
+            let x = arena.vx[v_id];
+            let y = arena.vy[v_id];
+            if x >= min_x && x <= max_x && y >= min_y && y <= max_y {
+                arena.sorted_verts[count] = v_id as u32;
+                count += 1;
+            }
+        }
+    }
+    sort_indices_by_f64(&mut arena.sorted_verts[..count], &arena.vx);
+    populate_sorted_vert_coords(arena, count);
     count
 }
 
@@ -793,42 +922,16 @@ pub fn prepare_normalized_segments(arena: &mut KernelArena, seg_count: usize, us
         (numerical_floor, numerical_floor * 4.0)
     };
 
-    let r0_sq = r0 * r0;
-    let mut total_manhattan = 0.0;
-    let mut non_zero_count = 0usize;
-
     for i in 0..seg_count {
         let base = i * 5;
-        let x0 = arena.raw_segments[base] - cx;
-        let y0 = arena.raw_segments[base + 1] - cy;
-        let x1 = arena.raw_segments[base + 2] - cx;
-        let y1 = arena.raw_segments[base + 3] - cy;
-        let b = arena.raw_segments[base + 4] as u32;
-        arena.prep_x0[i] = x0;
-        arena.prep_y0[i] = y0;
-        arena.prep_x1[i] = x1;
-        arena.prep_y1[i] = y1;
-        arena.prep_body[i] = b;
-        let dx = x1 - x0;
-        let dy = y1 - y0;
-        if dx * dx + dy * dy > r0_sq {
-            total_manhattan += dx.abs() + dy.abs();
-            non_zero_count += 1;
-        }
+        arena.prep_x0[i] = arena.raw_segments[base] - cx;
+        arena.prep_y0[i] = arena.raw_segments[base + 1] - cy;
+        arena.prep_x1[i] = arena.raw_segments[base + 2] - cx;
+        arena.prep_y1[i] = arena.raw_segments[base + 3] - cy;
+        arena.prep_body[i] = arena.raw_segments[base + 4] as u32;
     }
 
-    let mean_len = if non_zero_count > 0 {
-        (0.75 * total_manhattan) / (non_zero_count as f64)
-    } else {
-        scale
-    };
-    let target_grid_dim = ((seg_count * 4) as f64).sqrt().max(8.0);
-    let bbox_cell = if diagonal > 0.0 {
-        diagonal / target_grid_dim
-    } else {
-        1.0
-    };
-    let cell_size = (r0 * 16.0).max((mean_len * 0.5).min(bbox_cell)).max(1e-6 * scale);
+    let cell_size = (r0 * 16.0).max(r_max * 8.0).max(1e-6 * scale);
 
     arena.prep_cx = cx;
     arena.prep_cy = cy;
@@ -962,12 +1065,50 @@ pub fn consolidate_prepared(arena: &mut KernelArena) {
         }
         arena.step_e_queue.clear();
 
-        let mut active_edge_count = build_sorted_active_edges(arena);
+        let max_tol = r_max + initial_vertex_radius;
+        let pad = max_tol + r0;
+        let mut act_min_x = f64::INFINITY;
+        let mut act_max_x = f64::NEG_INFINITY;
+        let mut act_min_y = f64::INFINITY;
+        let mut act_max_y = f64::NEG_INFINITY;
+        if iter > 0 {
+            for &dv in &arena.dirty_verts {
+                let dvu = dv as usize;
+                let x = arena.vx[dvu];
+                let y = arena.vy[dvu];
+                act_min_x = act_min_x.min(x);
+                act_max_x = act_max_x.max(x);
+                act_min_y = act_min_y.min(y);
+                act_max_y = act_max_y.max(y);
+            }
+            for &de in &arena.dirty_edges {
+                let deu = de as usize;
+                if arena.e_alive[deu] == 0 {
+                    continue;
+                }
+                act_min_x = act_min_x.min(arena.e_min_x[deu]);
+                act_max_x = act_max_x.max(arena.e_max_x[deu]);
+                act_min_y = act_min_y.min(arena.e_min_y[deu]);
+                act_max_y = act_max_y.max(arena.e_max_y[deu]);
+            }
+            act_min_x -= pad;
+            act_max_x += pad;
+            act_min_y -= pad;
+            act_max_y += pad;
+        }
+        let mut active_edge_count = if iter == 0 {
+            build_sorted_active_edges(arena)
+        } else {
+            build_sorted_active_edges_in_box(arena, act_min_x, act_max_x, act_min_y, act_max_y)
+        };
 
         // Operator 3a & 3b: Unified Two-Pointer 1D X-Sweep between sorted_edges and sorted_verts
         if !arena.dirty_verts.is_empty() || (iter > 0 && !arena.dirty_edges.is_empty()) {
-            let active_vert_count = build_sorted_active_verts(arena);
-            let max_tol = r_max + initial_vertex_radius;
+            let active_vert_count = if iter == 0 {
+                build_sorted_active_verts(arena)
+            } else {
+                build_sorted_active_verts_in_box(arena, act_min_x, act_max_x, act_min_y, act_max_y)
+            };
             let has_dirty_verts = !arena.dirty_verts.is_empty();
             let mut dv_min_x = f64::INFINITY;
             let mut dv_max_x = f64::NEG_INFINITY;
@@ -1002,31 +1143,49 @@ pub fn consolidate_prepared(arena: &mut KernelArena) {
                         continue;
                     }
                 }
-                let x_start = arena.e_min_x[eu] - max_tol;
+                let x_start = arena.se_min_x[i] - max_tol;
 
                 while v_start < active_vert_count
-                    && arena.vx[arena.sorted_verts[v_start] as usize] < x_start
+                    && unsafe { *arena.sv_x.get_unchecked(v_start) } < x_start
                 {
                     v_start += 1;
                 }
 
                 let x_end = arena.e_max_x[eu] + max_tol;
-                let min_y = arena.e_min_y[eu];
-                let max_y = arena.e_max_y[eu];
+                let min_y_pad = arena.se_min_y[i] - max_tol;
+                let max_y_pad = arena.se_max_y[i] + max_tol;
                 let u = arena.ev0[eu];
                 let v = arena.ev1[eu];
                 let ax = arena.vx[u as usize];
                 let ay = arena.vy[u as usize];
                 let bx = arena.vx[v as usize];
                 let by = arena.vy[v as usize];
+                let dx = bx - ax;
+                let dy = by - ay;
+                let len_sq = dx * dx + dy * dy;
+                if len_sq == 0.0 {
+                    continue;
+                }
+                let inv_len_sq = 1.0 / len_sq;
+                let max_cross_sq = (max_tol * max_tol) * len_sq;
 
                 for k in v_start..active_vert_count {
-                    let v_id = arena.sorted_verts[k];
-                    let vu = v_id as usize;
-                    let px = arena.vx[vu];
+                    let px = unsafe { *arena.sv_x.get_unchecked(k) };
                     if px > x_end {
                         break;
                     }
+                    let py = unsafe { *arena.sv_y.get_unchecked(k) };
+                    if py < min_y_pad || py > max_y_pad {
+                        continue;
+                    }
+                    let qx = px - ax;
+                    let qy = py - ay;
+                    let cross = qx * dy - qy * dx;
+                    if cross * cross > max_cross_sq {
+                        continue;
+                    }
+                    let v_id = unsafe { *arena.sorted_verts.get_unchecked(k) };
+                    let vu = v_id as usize;
                     if !edge_dirty && arena.vert_step_stamp[vu] != step_stamp {
                         continue;
                     }
@@ -1034,12 +1193,15 @@ pub fn consolidate_prepared(arena: &mut KernelArena) {
                         continue;
                     }
                     let tol = arena.vr[vu] + initial_vertex_radius;
-                    let py = arena.vy[vu];
-                    if py < min_y - tol || py > max_y + tol {
+                    if cross * cross > (tol * tol) * len_sq {
                         continue;
                     }
-                    let t = project_point_to_segment_t(px, py, ax, ay, bx, by, tol);
-                    if t > 0.0 {
+                    let dot = qx * dx + qy * dy;
+                    if dot <= 0.0 || dot >= len_sq {
+                        continue;
+                    }
+                    let t = dot * inv_len_sq;
+                    if t > 0.0 && t < 1.0 {
                         record_split(arena, edge_id, t, v_id);
                     }
                 }
@@ -1056,6 +1218,12 @@ pub fn consolidate_prepared(arena: &mut KernelArena) {
                 if arena.e_alive[eu] != 0 {
                     arena.edge_crossing_stamp[eu] = step_stamp;
                     arena.dirty_edges.push(e_id);
+                    if iter > 0 {
+                        act_min_x = act_min_x.min(arena.e_min_x[eu] - pad);
+                        act_max_x = act_max_x.max(arena.e_max_x[eu] + pad);
+                        act_min_y = act_min_y.min(arena.e_min_y[eu] - pad);
+                        act_max_y = act_max_y.max(arena.e_max_y[eu] + pad);
+                    }
                 }
             }
             arena.step_e_queue.clear();
@@ -1064,7 +1232,11 @@ pub fn consolidate_prepared(arena: &mut KernelArena) {
                 arena.in_step_v_queue[v_id] = 0;
             }
             arena.step_v_queue.clear();
-            active_edge_count = build_sorted_active_edges(arena);
+            active_edge_count = if iter == 0 {
+                build_sorted_active_edges(arena)
+            } else {
+                build_sorted_active_edges_in_box(arena, act_min_x, act_max_x, act_min_y, act_max_y)
+            };
         }
 
         // Operator 4b: Interior Segment-Segment Crossings via 1D X-Sweep over sorted_edges
@@ -1105,47 +1277,53 @@ pub fn consolidate_prepared(arena: &mut KernelArena) {
                     }
                 }
                 let max_x1 = arena.e_max_x[e1u] + r0;
-                let min_y1 = arena.e_min_y[e1u] - r0;
-                let max_y1 = arena.e_max_y[e1u] + r0;
-                let e1v0 = arena.ev0[e1u];
-                let e1v1 = arena.ev1[e1u];
-                let ax = arena.vx[e1v0 as usize];
-                let ay = arena.vy[e1v0 as usize];
-                let bx = arena.vx[e1v1 as usize];
-                let by = arena.vy[e1v1 as usize];
+                let min_y1 = arena.se_min_y[i] - r0;
+                let max_y1 = arena.se_max_y[i] + r0;
+                let e1v0 = arena.se_v0[i];
+                let e1v1 = arena.se_v1[i];
+                let ax = arena.se_x0[i];
+                let ay = arena.se_y0[i];
+                let bx = arena.se_x1[i];
+                let by = arena.se_y1[i];
+                let rx = bx - ax;
+                let ry = by - ay;
+                let len_r_sq = rx * rx + ry * ry;
 
                 for j in (i + 1)..active_edge_count {
-                    let e2_id = arena.sorted_edges[j];
-                    let e2u = e2_id as usize;
-                    if arena.e_min_x[e2u] > max_x1 {
+                    if unsafe { *arena.se_min_x.get_unchecked(j) } > max_x1 {
                         break;
                     }
-                    if arena.e_alive[e2u] == 0 {
+                    if unsafe {
+                        *arena.se_max_y.get_unchecked(j) < min_y1
+                            || *arena.se_min_y.get_unchecked(j) > max_y1
+                    } {
                         continue;
                     }
-                    if !e1_dirty && arena.edge_crossing_stamp[e2u] != step_stamp {
-                        continue;
-                    }
-                    if arena.e_max_y[e2u] < min_y1 || arena.e_min_y[e2u] > max_y1 {
-                        continue;
-                    }
-                    let e2v0 = arena.ev0[e2u];
-                    let e2v1 = arena.ev1[e2u];
+                    let e2v0 = unsafe { *arena.se_v0.get_unchecked(j) };
+                    let e2v1 = unsafe { *arena.se_v1.get_unchecked(j) };
                     if e1v0 == e2v0 || e1v0 == e2v1 || e1v1 == e2v0 || e1v1 == e2v1 {
                         continue;
+                    }
+                    if !e1_dirty {
+                        let e2u = unsafe { *arena.sorted_edges.get_unchecked(j) } as usize;
+                        if arena.edge_crossing_stamp[e2u] != step_stamp {
+                            continue;
+                        }
                     }
 
                     if let Some((hit_s, hit_t, hit_x, hit_y)) = intersect_segments_interior_fast(
                         ax,
                         ay,
-                        bx,
-                        by,
-                        arena.vx[e2v0 as usize],
-                        arena.vy[e2v0 as usize],
-                        arena.vx[e2v1 as usize],
-                        arena.vy[e2v1 as usize],
+                        rx,
+                        ry,
+                        len_r_sq,
+                        unsafe { *arena.se_x0.get_unchecked(j) },
+                        unsafe { *arena.se_y0.get_unchecked(j) },
+                        unsafe { *arena.se_x1.get_unchecked(j) },
+                        unsafe { *arena.se_y1.get_unchecked(j) },
                         r0,
                     ) {
+                        let e2_id = unsafe { *arena.sorted_edges.get_unchecked(j) };
                         let v_int = find_or_create_vertex(
                             arena,
                             hit_x,
@@ -1169,7 +1347,10 @@ pub fn consolidate_prepared(arena: &mut KernelArena) {
             }
         }
 
-        if !iter_changed && arena.step_v_queue.is_empty() && arena.step_e_queue.is_empty() {
+        if (!iter_changed || (arena.zero_v_queue.is_empty() && arena.zero_e_queue.is_empty()))
+            && arena.step_v_queue.is_empty()
+            && arena.step_e_queue.is_empty()
+        {
             break;
         }
     }

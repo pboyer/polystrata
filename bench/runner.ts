@@ -101,6 +101,8 @@ function measureWorkloadForLibrary(
       sampleTimesMs.push(dt);
     }
 
+    task.dispose?.();
+
     sampleTimesMs.sort((a, b) => a - b);
     const trimCount =
       sampleTimesMs.length >= 10
@@ -233,6 +235,7 @@ export function runFuzzStressComparison(numTrials = 150): FuzzStressSummary[] {
         const err2 = Math.abs(areaD + areaI - inp.areaA);
         const err3 = Math.abs(areaX + 2 * areaI - (inp.areaA + inp.areaB));
         const maxErr = Math.max(err1, err2, err3);
+        task.dispose?.();
 
         if (Number.isFinite(maxErr) && maxErr < 0.5) {
           areaIdentityPass++;

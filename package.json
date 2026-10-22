@@ -66,6 +66,7 @@
     "@types/node": "^26.6.5",
     "@velipso/polybool": "^2.0.11",
     "clipper2-js": "^1.2.4",
+    "manifold-3d": "^3.5.4",
     "martinez-polygon-clipping": "^0.7.3",
     "polygon-clipping": "^0.15.7",
     "tsx": "^4.23.15",

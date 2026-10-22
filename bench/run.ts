@@ -1,4 +1,5 @@
 import { LIBRARY_ADAPTERS } from "./adapters.js";
+import { initManifoldWasm } from "./manifold-wasm.js";
 import { runFullBenchmarkSuite } from "./runner.js";
 
 function pad(str: string, width: number, rightAlign = false): string {
@@ -7,32 +8,49 @@ function pad(str: string, width: number, rightAlign = false): string {
   return rightAlign ? spaces + str : str + spaces;
 }
 
-function main(): void {
-  console.log("================================================================================================");
-  console.log("  2D POLYGON CLIPPING & BOOLEAN KERNEL BENCHMARK SUITE");
-  console.log("  Comparing polystrata vs. clipper2-js, polygon-clipping, martinez-polygon-clipping, @velipso/polybool");
-  console.log("================================================================================================\n");
+function logProgress(msg: string): void {
+  if (process.stderr.isTTY) {
+    process.stderr.write(`\r${msg.padEnd(76)}`);
+  } else {
+    console.error(msg);
+  }
+}
 
-  console.log("Libraries under test:");
+async function main(): Promise<void> {
+  await initManifoldWasm();
+
+  console.log(
+    "================================================================================================",
+  );
+  console.log("  2D POLYGON CLIPPING & BOOLEAN KERNEL BENCHMARK SUITE");
+  console.log(
+    "  Comparing polystrata vs. manifold-3d (CrossSection), clipper2-js, polygon-clipping, martinez, @velipso/polybool",
+  );
+  console.log(
+    "================================================================================================\n",
+  );
+
+  console.log("2D Libraries under test:");
   for (const lib of LIBRARY_ADAPTERS) {
-    console.log(`  - ${pad(lib.name, 26)} v${pad(lib.version, 8)} (${lib.algorithm})`);
+    console.log(`  - ${pad(lib.name, 27)} v${pad(lib.version, 8)} (${lib.algorithm})`);
   }
   console.log("");
 
-  const report = runFullBenchmarkSuite(60, 120, (msg) => {
-    if (process.stderr.isTTY) {
-      process.stderr.write(`\r${msg.padEnd(60)}`);
-    } else {
-      console.error(msg);
-    }
-  });
+  const report2D = runFullBenchmarkSuite(60, 120, logProgress);
+  if (process.stderr.isTTY) process.stderr.write("\r" + " ".repeat(76) + "\r");
 
-  for (const summary of report.workloadSummaries) {
+  for (const summary of report2D.workloadSummaries) {
     const w = summary.workload;
-    console.log(`------------------------------------------------------------------------------------------------`);
-    console.log(`Workload: ${w.name} [${w.category.toUpperCase()}] (Vertices: ${w.vertexCount})`);
-    console.log(`          ${w.description}`);
-    console.log(`------------------------------------------------------------------------------------------------`);
+    console.log(
+      "------------------------------------------------------------------------------------------------",
+    );
+    console.log(
+      `2D Workload: ${w.name} [${w.category.toUpperCase()}] (Vertices: ${w.vertexCount})`,
+    );
+    console.log(`             ${w.description}`);
+    console.log(
+      "------------------------------------------------------------------------------------------------",
+    );
     console.log(
       `${pad("Library", 27)} | ${pad("Ops/sec", 11, true)} | ${pad("Mean (ms)", 10, true)} | ${pad("p50 (ms)", 9, true)} | ${pad("p95 (ms)", 9, true)} | ${pad("Area Err", 10, true)} | Status`,
     );
@@ -56,9 +74,15 @@ function main(): void {
     console.log("");
   }
 
-  console.log("================================================================================================");
-  console.log("  ADVERSARIAL FUZZ TORTURE BENCHMARK (120 Random Degenerate Polygon Pairs x 4 Boolean Ops = 480 Ops)");
-  console.log("================================================================================================");
+  console.log(
+    "================================================================================================",
+  );
+  console.log(
+    "  2D ADVERSARIAL FUZZ TORTURE BENCHMARK (120 Random Degenerate Polygon Pairs x 4 Boolean Ops = 480 Ops)",
+  );
+  console.log(
+    "================================================================================================",
+  );
   console.log(
     `${pad("Library", 27)} | ${pad("Throughput", 13, true)} | ${pad("Total Time", 11, true)} | ${pad("Pass Rate", 13, true)} | ${pad("Crashes", 8, true)} | ${pad("Area Fails", 10, true)}`,
   );
@@ -66,7 +90,7 @@ function main(): void {
     `${"-".repeat(27)}-+-${"-".repeat(13)}-+-${"-".repeat(11)}-+-${"-".repeat(13)}-+-${"-".repeat(8)}-+-${"-".repeat(10)}`,
   );
 
-  for (const f of report.fuzzSummaries) {
+  for (const f of report2D.fuzzSummaries) {
     const passPct = ((f.areaIdentityPass / f.trials) * 100).toFixed(1) + "%";
     const passStr = `${f.areaIdentityPass}/${f.trials} (${passPct})`;
     const opsStr = `${Math.round(f.opsPerSec).toLocaleString()} op/s`;
@@ -75,13 +99,18 @@ function main(): void {
       `${pad(f.libraryName, 27)} | ${pad(opsStr, 13, true)} | ${pad(timeStr, 11, true)} | ${pad(passStr, 13, true)} | ${pad(String(f.crashes), 8, true)} | ${pad(String(f.areaIdentityFail), 10, true)}`,
     );
   }
-  console.log("================================================================================================\n");
+  console.log(
+    "================================================================================================\n",
+  );
 
   if (process.argv.includes("--json")) {
     console.log("JSON_REPORT_START");
-    console.log(JSON.stringify(report, null, 2));
+    console.log(JSON.stringify(report2D, null, 2));
     console.log("JSON_REPORT_END");
   }
 }
 
-main();
+main().catch((err) => {
+  console.error(err);
+  process.exit(1);
+});

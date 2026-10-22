@@ -102,6 +102,13 @@ pub fn build_planar_topology(arena: &mut KernelArena) {
             continue;
         }
         let offset = arena.v_spoke_offset[v_id] as usize;
+        if k == 2 {
+            let s0 = arena.spokes_csr[offset];
+            let s1 = arena.spokes_csr[offset + 1];
+            arena.he_next[(s0 ^ 1) as usize] = s1 as i32;
+            arena.he_next[(s1 ^ 1) as usize] = s0 as i32;
+            continue;
+        }
         let ox = arena.vx[v_id];
         let oy = arena.vy[v_id];
 
@@ -215,7 +222,7 @@ fn ray_segment_hit_distance(
     f64::INFINITY
 }
 
-fn pick_cycle_sample_point(c_id: usize, arena: &KernelArena) -> (f64, f64) {
+fn pick_cycle_sample_point(c_id: usize, arena: &KernelArena, edges_sorted: bool) -> (f64, f64) {
     let r0 = arena.prep_r0;
     let start = arena.cycle_start[c_id] as usize;
     let count = arena.cycle_len[c_id] as usize;
@@ -294,11 +301,16 @@ fn pick_cycle_sample_point(c_id: usize, arena: &KernelArena) -> (f64, f64) {
     let num_active = arena.active_edge_ids.len();
     for i in 0..num_active {
         let e_id = arena.active_edge_ids[i] as usize;
+        if arena.e_min_x[e_id] > ray_max_x {
+            if edges_sorted {
+                break;
+            }
+            continue;
+        }
         if e_id == cand_edge_id {
             continue;
         }
         if arena.e_max_x[e_id] < ray_min_x
-            || arena.e_min_x[e_id] > ray_max_x
             || arena.e_max_y[e_id] < ray_min_y
             || arena.e_min_y[e_id] > ray_max_y
         {
@@ -369,11 +381,17 @@ fn evaluate_winding_numbers_subtended_angle(
     }
 }
 
-fn evaluate_winding_numbers(px: f64, py: f64, arena: &KernelArena, out_windings: &mut [f64]) {
+fn evaluate_winding_numbers(
+    px: f64,
+    py: f64,
+    arena: &KernelArena,
+    out_windings: &mut [f64],
+    edges_sorted: bool,
+) {
     let r0 = arena.prep_r0;
     let body_count = arena.prep_body_count;
     let r0_sq = r0 * r0;
-    let min_x_bound = px - r0;
+    let max_x_bound = px + r0;
 
     for b in 0..body_count {
         out_windings[b] = 0.0;
@@ -382,7 +400,10 @@ fn evaluate_winding_numbers(px: f64, py: f64, arena: &KernelArena, out_windings:
     let num_active = arena.active_edge_ids.len();
     for i in 0..num_active {
         let e_id = arena.active_edge_ids[i] as usize;
-        if arena.e_max_x[e_id] < min_x_bound {
+        if arena.e_min_x[e_id] > max_x_bound {
+            if edges_sorted {
+                break;
+            }
             continue;
         }
         let u = arena.ev0[e_id] as usize;
@@ -410,14 +431,14 @@ fn evaluate_winding_numbers(px: f64, py: f64, arena: &KernelArena, out_windings:
 
         let base = e_id * body_count;
         if upward {
-            if det > 0.0 {
+            if det < 0.0 {
                 for b in 0..body_count {
-                    out_windings[b] += arena.e_delta_w[base + b] as f64;
+                    out_windings[b] -= arena.e_delta_w[base + b] as f64;
                 }
             }
-        } else if det < 0.0 {
+        } else if det > 0.0 {
             for b in 0..body_count {
-                out_windings[b] -= arena.e_delta_w[base + b] as f64;
+                out_windings[b] += arena.e_delta_w[base + b] as f64;
             }
         }
     }
@@ -628,17 +649,29 @@ pub fn classify_and_extract(
     }
 
     let mut w_scratch = vec![0.0f64; body_count];
+    let mut edges_sorted = false;
 
     if is_closed_chain {
         arena.cycle_visited[..cycle_count].fill(0);
+        let mut comp_count = 0usize;
 
         for start_cid in 0..cycle_count {
             if arena.cycle_visited[start_cid] != 0 {
                 continue;
             }
+            if comp_count == 1 && !edges_sorted {
+                let e_min_x = &arena.e_min_x;
+                arena.active_edge_ids.sort_unstable_by(|&a, &b| {
+                    e_min_x[a as usize]
+                        .partial_cmp(&e_min_x[b as usize])
+                        .unwrap_or(core::cmp::Ordering::Equal)
+                });
+                edges_sorted = true;
+            }
+            comp_count += 1;
 
-            let (sx, sy) = pick_cycle_sample_point(start_cid, arena);
-            evaluate_winding_numbers(sx, sy, arena, &mut w_scratch);
+            let (sx, sy) = pick_cycle_sample_point(start_cid, arena, edges_sorted);
+            evaluate_winding_numbers(sx, sy, arena, &mut w_scratch, edges_sorted);
 
             arena.cycle_visited[start_cid] = 1;
             let base_start = start_cid * body_count;
@@ -698,8 +731,17 @@ pub fn classify_and_extract(
             }
         }
     } else {
+        if cycle_count > 1 {
+            let e_min_x = &arena.e_min_x;
+            arena.active_edge_ids.sort_unstable_by(|&a, &b| {
+                e_min_x[a as usize]
+                    .partial_cmp(&e_min_x[b as usize])
+                    .unwrap_or(core::cmp::Ordering::Equal)
+            });
+            edges_sorted = true;
+        }
         for c_id in 0..cycle_count {
-            let (sx, sy) = pick_cycle_sample_point(c_id, arena);
+            let (sx, sy) = pick_cycle_sample_point(c_id, arena, edges_sorted);
             evaluate_winding_numbers_subtended_angle(sx, sy, arena, &mut w_scratch);
             arena.cycle_keep[c_id] =
                 if eval_predicate(&w_scratch, body_count, op_code, rule_code) {
@@ -771,21 +813,33 @@ pub fn compute_cycles_and_windings(arena: &mut KernelArena, capture_samples: boo
     }
 
     let mut w_scratch = vec![0.0f64; body_count];
+    let mut edges_sorted = false;
 
     if is_closed_chain {
         arena.cycle_visited[..cycle_count].fill(0);
+        let mut comp_count = 0usize;
 
         for start_cid in 0..cycle_count {
             if arena.cycle_visited[start_cid] != 0 {
                 continue;
             }
+            if (comp_count == 1 || (capture_samples && cycle_count > 1)) && !edges_sorted {
+                let e_min_x = &arena.e_min_x;
+                arena.active_edge_ids.sort_unstable_by(|&a, &b| {
+                    e_min_x[a as usize]
+                        .partial_cmp(&e_min_x[b as usize])
+                        .unwrap_or(core::cmp::Ordering::Equal)
+                });
+                edges_sorted = true;
+            }
+            comp_count += 1;
 
-            let (sx, sy) = pick_cycle_sample_point(start_cid, arena);
+            let (sx, sy) = pick_cycle_sample_point(start_cid, arena, edges_sorted);
             if capture_samples {
                 arena.cycle_sample_x[start_cid] = sx + cx;
                 arena.cycle_sample_y[start_cid] = sy + cy;
             }
-            evaluate_winding_numbers(sx, sy, arena, &mut w_scratch);
+            evaluate_winding_numbers(sx, sy, arena, &mut w_scratch, edges_sorted);
 
             arena.cycle_visited[start_cid] = 1;
             let base_start = start_cid * body_count;
@@ -819,7 +873,7 @@ pub fn compute_cycles_and_windings(arena: &mut KernelArena, capture_samples: boo
 
                     arena.cycle_visited[next_cid] = 1;
                     if capture_samples {
-                        let (nsx, nsy) = pick_cycle_sample_point(next_cid, arena);
+                        let (nsx, nsy) = pick_cycle_sample_point(next_cid, arena, edges_sorted);
                         arena.cycle_sample_x[next_cid] = nsx + cx;
                         arena.cycle_sample_y[next_cid] = nsy + cy;
                     }
@@ -838,8 +892,17 @@ pub fn compute_cycles_and_windings(arena: &mut KernelArena, capture_samples: boo
             }
         }
     } else {
+        if cycle_count > 1 {
+            let e_min_x = &arena.e_min_x;
+            arena.active_edge_ids.sort_unstable_by(|&a, &b| {
+                e_min_x[a as usize]
+                    .partial_cmp(&e_min_x[b as usize])
+                    .unwrap_or(core::cmp::Ordering::Equal)
+            });
+            edges_sorted = true;
+        }
         for c_id in 0..cycle_count {
-            let (sx, sy) = pick_cycle_sample_point(c_id, arena);
+            let (sx, sy) = pick_cycle_sample_point(c_id, arena, edges_sorted);
             if capture_samples {
                 arena.cycle_sample_x[c_id] = sx + cx;
                 arena.cycle_sample_y[c_id] = sy + cy;

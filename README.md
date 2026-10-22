@@ -173,24 +173,28 @@ interface KernelOptions {
 
 ---
 
-## Benchmarks vs. Other JavaScript/TypeScript Libraries
+## Benchmarks vs. `manifold-3d (CrossSection)` & Other JavaScript/TypeScript Libraries
 
-Measured with `npm run bench` on Node.js v24 across all 4 Boolean operations (`union`, `intersect`, `difference`, `xor`):
+> Need 3D Planar B-Rep Boolean operations? See [**`polystrata-3d`**](https://github.com/pboyer/polystrata-3d).
 
-| Workload | Vertices | `polystrata` (Rust/WASM) | `clipper2-js` (v1.2.4) | `polygon-clipping` (v0.15.7) | `@velipso/polybool` (v2.0.11) | `martinez` (v0.9.0) |
-| :--- | ---: | ---: | ---: | ---: | ---: | ---: |
-| **CAD Gears + Bore Holes** | 192 | **29,573 op/s** (PASS) | 13,065 op/s (PASS) | 4,627 op/s (PASS) | 3,534 op/s (PASS) | 11,446 op/s (FAIL) |
-| **Swiss-Cheese 25-Hole Plate** | 224 | **15,814 op/s** (PASS) | 16,765 op/s (PASS) | 3,368 op/s (PASS) | 2,615 op/s (PASS) | 8,257 op/s (FAIL) |
-| **Comb Array x Diagonal Bars** | 72 | **19,526 op/s** (PASS) | 15,106 op/s (PASS) | 2,120 op/s (PASS) | 2,584 op/s (PASS) | 6,491 op/s (FAIL) |
-| **Star Scaling (N = 64)** | 64 | **71,099 op/s** (PASS) | 36,618 op/s (PASS) | 11,597 op/s (PASS) | 11,513 op/s (PASS) | 30,544 op/s (FAIL) |
-| **Star Scaling (N = 256)** | 256 | **9,978 op/s** (PASS) | 3,576 op/s (PASS) | 1,322 op/s (PASS) | 1,403 op/s (PASS) | 3,413 op/s (FAIL) |
-| **Star Scaling (N = 1024)** | 1,024 | **641 op/s** (PASS) | 244 op/s (PASS) | 97 op/s (PASS) | 113 op/s (PASS) | 242 op/s (FAIL) |
-| **Star Scaling (N = 2048)** | 2,048 | **169 op/s** (PASS) | 55 op/s (PASS) | 21 op/s (PASS) | 23 op/s (PASS) | 59 op/s (FAIL) |
-| **Shared Collinear Walls** | 24 | **235,420 op/s** (PASS) | 134,436 op/s (PASS) | 24,264 op/s (PASS) | 39,638 op/s (FAIL) | 94,279 op/s (FAIL) |
-| **Shallow-Angle (0.08°)** | 8 | **367,464 op/s** (PASS) | 247,824 op/s (PASS) | 30,623 op/s (PASS) | 73,993 op/s (PASS) | 160,707 op/s (PASS) |
-| **Bowties & Pinch Corners** | 12 | **305,872 op/s** (PASS) | 275,198 op/s (PASS) | 26,166 op/s (FAIL) | 53,903 op/s (FAIL) | 129,016 op/s (FAIL) |
-| **Large Offset (1.5 × 10⁶)** | 9 | **600,668 op/s** (PASS) | 401,598 op/s (PASS) | 74,535 op/s (PASS) | 126,446 op/s (PASS) | 329,175 op/s (PASS) |
-| **120-Pair Fuzz Suite (480 ops)** | — | **234,380 op/s (120/120)** | 119,495 op/s (120/120) | 38,276 op/s (116/120) | 52,212 op/s (113/120) | 122,595 op/s (68/120) |
+Run the 2D benchmark suite locally with `npm run bench`:
+
+Measured across all 4 Boolean operations (`union`, `intersect`, `difference`, `xor`):
+
+| 2D Workload | Vertices | `polystrata` (Rust/WASM) | `manifold-3d (CrossSection)` | `clipper2-js` (v1.2.4) | `polygon-clipping` (v0.15.7) | `@velipso/polybool` (v2.0.11) | `martinez` (v0.9.0) |
+| :--- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| **CAD Gears + Bore Holes** | 192 | **35,374 op/s** (PASS) | 11,540 op/s (PASS) | 12,702 op/s (PASS) | 4,498 op/s (PASS) | 3,377 op/s (PASS) | 11,186 op/s (FAIL) |
+| **Swiss-Cheese 25-Hole Plate** | 224 | **19,942 op/s** (PASS) | 9,603 op/s (PASS) | 15,754 op/s (PASS) | 3,315 op/s (PASS) | 2,413 op/s (PASS) | 7,789 op/s (FAIL) |
+| **Comb Array x Diagonal Bars** | 72 | **22,692 op/s** (PASS) | 6,293 op/s (PASS) | 14,501 op/s (PASS) | 2,012 op/s (PASS) | 2,322 op/s (PASS) | 5,930 op/s (FAIL) |
+| **Star Scaling (N = 64)** | 64 | **85,529 op/s** (PASS) | 24,670 op/s (PASS) | 35,798 op/s (PASS) | 10,842 op/s (PASS) | 10,673 op/s (PASS) | 28,490 op/s (FAIL) |
+| **Star Scaling (N = 256)** | 256 | **12,797 op/s** (PASS) | 3,599 op/s (PASS) | 3,414 op/s (PASS) | 1,270 op/s (PASS) | 1,267 op/s (PASS) | 3,167 op/s (FAIL) |
+| **Star Scaling (N = 1024)** | 1,024 | **943 op/s** (PASS) | 256 op/s (PASS) | 227 op/s (PASS) | 90 op/s (PASS) | 101 op/s (PASS) | 221 op/s (FAIL) |
+| **Star Scaling (N = 2048)** | 2,048 | **252 op/s** (PASS) | 53 op/s (PASS) | 52 op/s (PASS) | 20 op/s (PASS) | 22 op/s (PASS) | 55 op/s (FAIL) |
+| **Shared Collinear Walls** | 24 | **254,867 op/s** (PASS) | 108,414 op/s (PASS) | 131,411 op/s (PASS) | 23,419 op/s (PASS) | 36,718 op/s (FAIL) | 87,546 op/s (FAIL) |
+| **Shallow-Angle (0.08°)** | 8 | **402,694 op/s** (PASS) | 86,176 op/s (PASS) | 236,816 op/s (PASS) | 29,982 op/s (PASS) | 69,712 op/s (PASS) | 159,550 op/s (PASS) |
+| **Bowties & Pinch Corners** | 12 | **368,411 op/s** (PASS) | 132,774 op/s (PASS) | 272,199 op/s (PASS) | 24,481 op/s (FAIL) | 51,096 op/s (FAIL) | 123,255 op/s (FAIL) |
+| **Large Offset (1.5 × 10⁶)** | 9 | **690,261 op/s** (PASS) | 140,851 op/s (PASS) | 378,737 op/s (PASS) | 72,249 op/s (PASS) | 124,478 op/s (PASS) | 333,999 op/s (PASS) |
+| **120-Pair Fuzz Suite (480 ops)** | — | **259,811 op/s (120/120)** | 67,327 op/s (120/120) | 121,216 op/s (120/120) | 35,743 op/s (116/120) | 49,887 op/s (113/120) | 125,209 op/s (68/120) |
 
 ---
 

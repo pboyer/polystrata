@@ -9,11 +9,13 @@ import {
   signedLoopArea,
   type WasmPathsResult,
 } from "../src/index.js";
+import { getManifoldWasm } from "./manifold-wasm.js";
 import type { BenchOp } from "./workloads.js";
 
 export interface PreparedTask {
   run: (op: BenchOp) => unknown;
   computeArea: (result: unknown) => number;
+  dispose?: () => void;
 }
 
 export interface LibraryAdapter {
@@ -171,6 +173,54 @@ export const LIBRARY_ADAPTERS: LibraryAdapter[] = [
           }
         },
         computeArea: (res) => (res as WasmPathsResult).totalArea,
+      };
+    },
+  },
+
+  {
+    id: "manifold-2d",
+    name: "manifold-3d (CrossSection)",
+    version: "3.5.4",
+    algorithm: "C++/WASM Clipper2 Vatti Scanbeam (Manifold CrossSection)",
+    prepare: (subject, clip) => {
+      const wasm = getManifoldWasm();
+      const subPolys = subject.map((l) => l.map((p) => [p.x, p.y] as [number, number]));
+      const clipPolys = clip.map((l) => l.map((p) => [p.x, p.y] as [number, number]));
+      const csA = new wasm.CrossSection(subPolys, "Positive");
+      const csB = new wasm.CrossSection(clipPolys, "Positive");
+
+      return {
+        run: (op) => {
+          let out;
+          switch (op) {
+            case "union":
+              out = wasm.CrossSection.union(csA, csB);
+              break;
+            case "intersect":
+              out = wasm.CrossSection.intersection(csA, csB);
+              break;
+            case "difference":
+              out = wasm.CrossSection.difference(csA, csB);
+              break;
+            case "xor": {
+              const d1 = csA.subtract(csB);
+              const d2 = csB.subtract(csA);
+              out = d1.add(d2);
+              d1.delete();
+              d2.delete();
+              break;
+            }
+          }
+          const area = out.area();
+          const polys = out.toPolygons();
+          out.delete();
+          return { area, polys };
+        },
+        computeArea: (res) => (res as { area: number }).area,
+        dispose: () => {
+          csA.delete();
+          csB.delete();
+        },
       };
     },
   },

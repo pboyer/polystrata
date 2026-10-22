@@ -1,4 +1,5 @@
 import { LIBRARY_ADAPTERS } from "../bench/adapters.js";
+import { initManifoldWasm } from "../bench/manifold-wasm.js";
 import {
   type FullBenchmarkReport,
   runFullBenchmarkSuite,
@@ -7,6 +8,7 @@ import { initPolystrataWasm } from "../src/index.js";
 
 const LIB_COLORS: Record<string, string> = {
   polystrata: "#38bdf8",
+  "manifold-2d": "#f472b6",
   "clipper2-js": "#a78bfa",
   "polygon-clipping": "#34d399",
   martinez: "#fbbf24",
@@ -17,11 +19,11 @@ const statusEl = document.getElementById("bench-status")!;
 const cardsEl = document.getElementById("lib-cards")!;
 const fuzzTbody = document.getElementById("fuzz-tbody")!;
 const workloadTbody = document.getElementById("workload-tbody")!;
+
 const btnRunAll = document.getElementById("btn-run-all") as HTMLButtonElement;
 const btnRunQuick = document.getElementById("btn-run-quick") as HTMLButtonElement;
 
-function renderReport(report: FullBenchmarkReport): void {
-  // 1. Render Library Summary Cards
+function renderReport2D(report: FullBenchmarkReport): void {
   cardsEl.innerHTML = "";
   for (const lib of LIBRARY_ADAPTERS) {
     const workloadPassCount = report.workloadSummaries.filter((ws) => {
@@ -30,11 +32,11 @@ function renderReport(report: FullBenchmarkReport): void {
     }).length;
     const fuzz = report.fuzzSummaries.find((f) => f.libraryId === lib.id);
     const fuzzRate = fuzz
-      ? `${((fuzz.areaIdentityPass / fuzz.trials) * 100).toFixed(1)}%`
+      ? `${fuzz.areaIdentityPass}/${fuzz.trials} (${((fuzz.areaIdentityPass / fuzz.trials) * 100).toFixed(0)}%)`
       : "—";
 
     const card = document.createElement("div");
-    card.className = `lib-card ${lib.id.startsWith("polystrata") ? "highlight" : ""}`;
+    card.className = `lib-card ${lib.id === "polystrata" ? "highlight" : ""}`;
     card.innerHTML = `
       <div class="lib-card-header">
         <span class="lib-card-name" style="color: ${LIB_COLORS[lib.id] ?? "#f1f5f9"}">${lib.name}</span>
@@ -49,99 +51,102 @@ function renderReport(report: FullBenchmarkReport): void {
     cardsEl.appendChild(card);
   }
 
-  // 2. Render Fuzz Torture Table
   fuzzTbody.innerHTML = "";
-  for (const f of report.fuzzSummaries) {
-    const passPct = (f.areaIdentityPass / f.trials) * 100;
-    const isPerfect = f.areaIdentityFail === 0 && f.crashes === 0;
+  for (const fuzz of report.fuzzSummaries) {
+    const passPct = (fuzz.areaIdentityPass / fuzz.trials) * 100;
+    let verdictBadge = `<span class="badge-pass">100% ROBUST</span>`;
+    if (fuzz.crashes > 0 || passPct < 90) {
+      verdictBadge = `<span class="badge-fail">${fuzz.areaIdentityFail} AREA FAILS / ${fuzz.crashes} CRASH</span>`;
+    } else if (passPct < 100) {
+      verdictBadge = `<span class="badge-warn">${passPct.toFixed(1)}% (${fuzz.areaIdentityFail} DRIFT)</span>`;
+    }
+
     const tr = document.createElement("tr");
     tr.innerHTML = `
-      <td style="font-weight: 600; color: ${LIB_COLORS[f.libraryId] ?? "#f1f5f9"}">${f.libraryName}</td>
-      <td class="num">${Math.round(f.opsPerSec).toLocaleString()} op/s</td>
-      <td class="num">${f.totalMs.toFixed(1)} ms</td>
-      <td class="num">${f.areaIdentityPass} / ${f.trials} (${passPct.toFixed(1)}%)</td>
-      <td class="num">${f.crashes}</td>
-      <td class="num">${f.areaIdentityFail}</td>
-      <td>
-        <span class="${isPerfect ? "badge-pass" : "badge-fail"}">
-          ${isPerfect ? "100% ROBUST" : f.crashes > 0 ? "CRASH + SILENT ERR" : "SILENT AREA ERR"}
-        </span>
-      </td>
+      <td><strong style="color: ${LIB_COLORS[fuzz.libraryId] ?? "#fff"}">${fuzz.libraryName}</strong></td>
+      <td class="num">${Math.round(fuzz.opsPerSec).toLocaleString()} op/s</td>
+      <td class="num">${fuzz.totalMs.toFixed(1)} ms</td>
+      <td class="num">${fuzz.areaIdentityPass} / ${fuzz.trials} (${passPct.toFixed(1)}%)</td>
+      <td class="num">${fuzz.crashes}</td>
+      <td class="num">${fuzz.areaIdentityFail}</td>
+      <td>${verdictBadge}</td>
     `;
     fuzzTbody.appendChild(tr);
   }
 
-  // 3. Render Per-Workload Breakdown
   workloadTbody.innerHTML = "";
-  for (const ws of report.workloadSummaries) {
+  for (const summary of report.workloadSummaries) {
+    const w = summary.workload;
+    const maxOps = Math.max(...summary.results.map((r) => r.opsPerSec), 1);
+
     const headerTr = document.createElement("tr");
     headerTr.className = "workload-header-row";
     headerTr.innerHTML = `
       <td colspan="8">
-        [${ws.workload.category.toUpperCase()}] ${ws.workload.name}
-        <span style="font-weight: 400; color: var(--text-secondary); margin-left: 8px;">
-          (${ws.workload.vertexCount} vertices &mdash; ${ws.workload.description})
-        </span>
+        ${w.name} <span style="color: var(--text-muted); font-weight: 400; margin-left: 8px;">[${w.category.toUpperCase()} &bull; ${w.vertexCount} vertices] &mdash; ${w.description}</span>
       </td>
     `;
     workloadTbody.appendChild(headerTr);
 
-    const maxOps = Math.max(...ws.results.map((r) => (Number.isFinite(r.opsPerSec) ? r.opsPerSec : 0)), 1);
-
-    for (const r of ws.results) {
-      const pct = Math.min(100, Math.max(2, (r.opsPerSec / maxOps) * 100));
+    for (const r of summary.results) {
+      const pct = Math.max(2, Math.min(100, (r.opsPerSec / maxOps) * 100));
       const color = LIB_COLORS[r.libraryId] ?? "#38bdf8";
+      const statusBadge = r.succeeded
+        ? `<span class="badge-pass">PASS</span>`
+        : r.errorMessage
+          ? `<span class="badge-fail" title="${r.errorMessage}">CRASH</span>`
+          : `<span class="badge-fail">AREA-FAIL</span>`;
+
       const tr = document.createElement("tr");
       tr.innerHTML = `
-        <td style="font-weight: ${r.libraryId.startsWith("polystrata") ? "700" : "500"}; color: ${color}">
-          ${r.libraryName}
-        </td>
-        <td class="num">${Math.round(r.opsPerSec).toLocaleString()}</td>
+        <td><strong style="color: ${color}">${r.libraryName}</strong></td>
+        <td class="num">${r.opsPerSec > 0 ? Math.round(r.opsPerSec).toLocaleString() : "ERR"}</td>
         <td class="bar-cell">
           <div class="bar-track">
-            <div class="bar-fill" style="width: ${pct.toFixed(1)}%; background: ${color}"></div>
+            <div class="bar-fill" style="width: ${pct.toFixed(1)}%; background: ${color};"></div>
           </div>
         </td>
-        <td class="num">${r.meanMs.toFixed(3)}</td>
-        <td class="num">${r.p50Ms.toFixed(3)}</td>
-        <td class="num">${r.p95Ms.toFixed(3)}</td>
-        <td class="num">${r.areaIdentityError.toExponential(1)}</td>
-        <td>
-          <span class="${r.succeeded ? "badge-pass" : "badge-fail"}">
-            ${r.succeeded ? "PASS" : r.errorMessage ? "CRASH" : "ACCURACY-FAIL"}
-          </span>
-        </td>
+        <td class="num">${Number.isFinite(r.meanMs) ? r.meanMs.toFixed(3) : "—"}</td>
+        <td class="num">${Number.isFinite(r.p50Ms) ? r.p50Ms.toFixed(3) : "—"}</td>
+        <td class="num">${Number.isFinite(r.p95Ms) ? r.p95Ms.toFixed(3) : "—"}</td>
+        <td class="num">${Number.isFinite(r.areaIdentityError) ? r.areaIdentityError.toExponential(1) : "NaN"}</td>
+        <td>${statusBadge}</td>
       `;
       workloadTbody.appendChild(tr);
     }
   }
 }
 
-async function triggerBenchmark(durationMs: number, fuzzTrials: number): Promise<void> {
+async function executeSuite(durationMs: number, fuzzCount: number): Promise<void> {
   btnRunAll.disabled = true;
   btnRunQuick.disabled = true;
-  statusEl.textContent = "Initializing WASM & running benchmark suite in browser...";
+  statusEl.textContent = "Running 2D benchmark suite...";
 
-  await initPolystrataWasm();
   await new Promise((r) => setTimeout(r, 30));
+
   const t0 = performance.now();
-  const report = runFullBenchmarkSuite(durationMs, fuzzTrials, (msg) => {
+  const report2D = runFullBenchmarkSuite(durationMs, fuzzCount, (msg) => {
     statusEl.textContent = msg;
   });
-  const totalSec = ((performance.now() - t0) / 1000).toFixed(2);
-  renderReport(report);
-  statusEl.textContent = `Completed full benchmark suite in ${totalSec}s`;
+  renderReport2D(report2D);
+
+  const elapsed = ((performance.now() - t0) / 1000).toFixed(2);
+  statusEl.textContent = `Completed 2D benchmark suite in ${elapsed}s`;
   btnRunAll.disabled = false;
   btnRunQuick.disabled = false;
 }
 
-btnRunAll.addEventListener("click", () => {
-  void triggerBenchmark(80, 120);
-});
+btnRunAll.addEventListener("click", () => executeSuite(55, 120));
+btnRunQuick.addEventListener("click", () => executeSuite(20, 60));
 
-btnRunQuick.addEventListener("click", () => {
-  void triggerBenchmark(25, 60);
-});
+async function initPage(): Promise<void> {
+  try {
+    statusEl.textContent = "Loading polystrata & manifold-3d WASM...";
+    await Promise.all([initPolystrataWasm(), initManifoldWasm()]);
+    await executeSuite(20, 60);
+  } catch (err) {
+    statusEl.textContent = `Error initializing benchmarks: ${err instanceof Error ? err.message : String(err)}`;
+  }
+}
 
-// Run a quick initial pass on page load so the table is populated immediately
-void triggerBenchmark(20, 60);
+initPage();

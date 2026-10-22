@@ -33,6 +33,8 @@ pub struct KernelArena {
     pub in_step_v_queue: Vec<u8>,
     pub vert_step_stamp: Vec<u32>,
     pub sorted_verts: Vec<u32>,
+    pub sv_x: Vec<f64>,
+    pub sv_y: Vec<f64>,
 
     // Incidence pool
     pub inc_count: usize,
@@ -52,6 +54,15 @@ pub struct KernelArena {
     pub e_max_x: Vec<f64>,
     pub e_max_y: Vec<f64>,
     pub sorted_edges: Vec<u32>,
+    pub se_min_x: Vec<f64>,
+    pub se_min_y: Vec<f64>,
+    pub se_max_y: Vec<f64>,
+    pub se_v0: Vec<u32>,
+    pub se_v1: Vec<u32>,
+    pub se_x0: Vec<f64>,
+    pub se_y0: Vec<f64>,
+    pub se_x1: Vec<f64>,
+    pub se_y1: Vec<f64>,
     pub edge_crossing_stamp: Vec<u32>,
     pub crossing_stamp_gen: u32,
 
@@ -62,6 +73,8 @@ pub struct KernelArena {
     pub split_vert: Vec<u32>,
     pub split_next: Vec<i32>,
     pub split_edge_list: Vec<u32>,
+    pub split_scratch: Vec<(f64, u32)>,
+    pub chain_scratch: Vec<u32>,
 
     // Queues & scratches
     pub zero_v_queue: Vec<u32>,
@@ -149,6 +162,8 @@ impl KernelArena {
             in_step_v_queue: Vec::with_capacity(2048),
             vert_step_stamp: Vec::with_capacity(2048),
             sorted_verts: Vec::with_capacity(2048),
+            sv_x: Vec::with_capacity(2048),
+            sv_y: Vec::with_capacity(2048),
 
             inc_count: 0,
             inc_edge: Vec::with_capacity(4096),
@@ -166,6 +181,15 @@ impl KernelArena {
             e_max_x: Vec::with_capacity(2048),
             e_max_y: Vec::with_capacity(2048),
             sorted_edges: Vec::with_capacity(2048),
+            se_min_x: Vec::with_capacity(2048),
+            se_min_y: Vec::with_capacity(2048),
+            se_max_y: Vec::with_capacity(2048),
+            se_v0: Vec::with_capacity(2048),
+            se_v1: Vec::with_capacity(2048),
+            se_x0: Vec::with_capacity(2048),
+            se_y0: Vec::with_capacity(2048),
+            se_x1: Vec::with_capacity(2048),
+            se_y1: Vec::with_capacity(2048),
             edge_crossing_stamp: Vec::with_capacity(2048),
             crossing_stamp_gen: 1,
 
@@ -175,6 +199,8 @@ impl KernelArena {
             split_vert: Vec::with_capacity(1024),
             split_next: Vec::with_capacity(1024),
             split_edge_list: Vec::with_capacity(1024),
+            split_scratch: Vec::with_capacity(128),
+            chain_scratch: Vec::with_capacity(128),
 
             zero_v_queue: Vec::with_capacity(1024),
             zero_e_queue: Vec::with_capacity(1024),
@@ -242,6 +268,8 @@ impl KernelArena {
         self.in_step_v_queue.resize(cap, 0);
         self.vert_step_stamp.resize(cap, 0);
         self.sorted_verts.resize(cap, 0);
+        self.sv_x.resize(cap, 0.0);
+        self.sv_y.resize(cap, 0.0);
         self.v_spoke_offset.resize(cap, 0);
         self.v_spoke_count.resize(cap, 0);
         self.v_spoke_cursor.resize(cap, 0);
@@ -265,6 +293,15 @@ impl KernelArena {
             self.e_max_x.resize(cap, 0.0);
             self.e_max_y.resize(cap, 0.0);
             self.sorted_edges.resize(cap, 0);
+            self.se_min_x.resize(cap, 0.0);
+            self.se_min_y.resize(cap, 0.0);
+            self.se_max_y.resize(cap, 0.0);
+            self.se_v0.resize(cap, 0);
+            self.se_v1.resize(cap, 0);
+            self.se_x0.resize(cap, 0.0);
+            self.se_y0.resize(cap, 0.0);
+            self.se_x1.resize(cap, 0.0);
+            self.se_y1.resize(cap, 0.0);
             self.edge_crossing_stamp.resize(cap, 0);
             self.edge_split_head.resize(cap, -1);
         }

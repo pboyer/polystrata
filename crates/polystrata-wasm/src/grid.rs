@@ -51,6 +51,18 @@ impl SpatialHashGrid {
         self.inv_cell_size = 1.0 / safe_cell;
         self.node_count = 0;
         self.used_slots = 0;
+        if self.table_cap < entity_cap * 2 {
+            let mut new_cap = self.table_cap.max(1024);
+            while new_cap < entity_cap * 2 {
+                new_cap <<= 1;
+            }
+            self.table_cap = new_cap;
+            self.table_mask = new_cap - 1;
+            self.slot_ix.resize(new_cap, 0);
+            self.slot_iy.resize(new_cap, 0);
+            self.slot_stamp.resize(new_cap, 0);
+            self.slot_head.resize(new_cap, -1);
+        }
         self.grid_gen = self.grid_gen.wrapping_add(1);
         if self.grid_gen == 0 {
             self.slot_stamp.fill(0);
@@ -173,13 +185,6 @@ impl SpatialHashGrid {
         let mask = self.table_mask;
         let gen = self.grid_gen;
 
-        let mut stamp = self.current_stamp.wrapping_add(1);
-        if stamp == 0 {
-            self.seen_stamp.fill(0);
-            stamp = 1;
-        }
-        self.current_stamp = stamp;
-
         if ix0 == ix1 && iy0 == iy1 {
             let h = ((ix0.wrapping_mul(73856093)) ^ (iy0.wrapping_mul(19349663))) as usize;
             let mut slot = h & mask;
@@ -191,12 +196,7 @@ impl SpatialHashGrid {
                     let mut n = unsafe { *self.slot_head.get_unchecked(slot) };
                     while n != -1 {
                         let nu = n as usize;
-                        let id = unsafe { *self.node_item.get_unchecked(nu) };
-                        let id_u = id as usize;
-                        if unsafe { *self.seen_stamp.get_unchecked(id_u) } != stamp {
-                            unsafe { *self.seen_stamp.get_unchecked_mut(id_u) = stamp };
-                            out.push(id);
-                        }
+                        out.push(unsafe { *self.node_item.get_unchecked(nu) });
                         n = unsafe { *self.node_next.get_unchecked(nu) };
                     }
                     return;
@@ -205,6 +205,13 @@ impl SpatialHashGrid {
             }
             return;
         }
+
+        let mut stamp = self.current_stamp.wrapping_add(1);
+        if stamp == 0 {
+            self.seen_stamp.fill(0);
+            stamp = 1;
+        }
+        self.current_stamp = stamp;
 
         for ix in ix0..=ix1 {
             let hx = ix.wrapping_mul(73856093);

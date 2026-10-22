@@ -3,7 +3,7 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>2D Polygon Clipping Benchmark — polystrata vs Top JS Libraries</title>
+    <title>2D Polygon Clipping Benchmark — polystrata vs. manifold-3d &amp; JS Clipping Libraries</title>
     <link rel="stylesheet" href="/demo/style.css" />
     <style>
       .bench-shell {
@@ -38,7 +38,7 @@
       .bench-toolbar-left {
         display: flex;
         align-items: center;
-        gap: 12px;
+        gap: 10px;
         flex-wrap: wrap;
       }
       .bench-status {
@@ -46,9 +46,29 @@
         font-size: 12px;
         color: var(--accent);
       }
+      .section-banner {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: 12px 16px;
+        border-radius: 10px;
+        background: linear-gradient(90deg, rgba(56, 189, 248, 0.14), rgba(167, 139, 250, 0.08));
+        border: 1px solid rgba(56, 189, 248, 0.35);
+      }
+      .section-banner h2 {
+        font-size: 16px;
+        font-weight: 700;
+        color: var(--text-primary);
+        margin: 0;
+      }
+      .section-banner span {
+        font-family: var(--font-mono);
+        font-size: 11.5px;
+        color: var(--accent);
+      }
       .lib-cards {
         display: grid;
-        grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+        grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
         gap: 12px;
       }
       .lib-card {
@@ -146,6 +166,17 @@
         color: #34d399;
         border: 1px solid rgba(52, 211, 153, 0.35);
       }
+      .badge-warn {
+        display: inline-block;
+        padding: 2px 8px;
+        border-radius: 4px;
+        font-family: var(--font-mono);
+        font-size: 11px;
+        font-weight: 600;
+        background: rgba(251, 191, 36, 0.15);
+        color: #fbbf24;
+        border: 1px solid rgba(251, 191, 36, 0.35);
+      }
       .badge-fail {
         display: inline-block;
         padding: 2px 8px;
@@ -158,7 +189,7 @@
         border: 1px solid rgba(248, 113, 113, 0.35);
       }
       .bar-cell {
-        min-width: 180px;
+        min-width: 160px;
       }
       .bar-track {
         width: 100%;
@@ -187,19 +218,19 @@
         <div class="brand">
           <div class="brand-badge">BENCH 2D</div>
           <div>
-            <h1>JavaScript Polygon Clipping Benchmark Suite</h1>
+            <h1>2D Polygon Clipping &amp; Healing Benchmark Suite</h1>
             <p class="subtitle">
-              Comparing <code>polystrata</code> vs. <code>clipper2-js</code>, <code>polygon-clipping</code>,
-              <code>martinez-polygon-clipping</code>, and <code>@velipso/polybool</code>
+              Comparing <code>polystrata</code> vs. <code>manifold-3d (CrossSection)</code>,
+              <code>clipper2-js</code>, <code>polygon-clipping</code>, <code>martinez</code>, and <code>@velipso/polybool</code>
             </p>
           </div>
         </div>
 
         <div class="mode-tabs">
           <a href="/" class="mode-tab" style="text-decoration: none; display: inline-flex; align-items: center;">
-            &larr; Interactive Kernel Lab &amp; Fuzzer
+            &larr; Interactive 2D Kernel Lab
           </a>
-          <span class="mode-tab active">JS Clipping Benchmark Suite</span>
+          <span class="mode-tab active">2D Benchmark Suite</span>
           <a href="https://github.com/pboyer/polystrata" target="_blank" rel="noopener noreferrer" class="mode-tab" style="text-decoration: none; display: inline-flex; align-items: center;">
             GitHub &#8599;
           </a>
@@ -209,67 +240,71 @@
       <main class="bench-main">
         <div class="bench-toolbar">
           <div class="bench-toolbar-left">
-            <button id="btn-run-all" class="action-btn primary">Run Full Benchmark Suite</button>
-            <button id="btn-run-quick" class="action-btn">Quick Run (40ms / workload)</button>
-            <span id="bench-status" class="bench-status">Ready &mdash; Pre-loaded with baseline measurements (click Run to re-measure live in your browser)</span>
+            <button id="btn-run-all" class="action-btn primary">Run Full 2D Benchmark Suite</button>
+            <button id="btn-run-quick" class="action-btn">Quick Run (25ms / workload)</button>
+            <span id="bench-status" class="bench-status">Initializing WASM engines...</span>
           </div>
           <div style="font-size: 12px; color: var(--text-secondary);">
             CLI Runner: <code>npm run bench</code>
           </div>
         </div>
 
-        <!-- Library Summary Cards -->
-        <div id="lib-cards" class="lib-cards"></div>
+        <div id="section-2d" style="display: flex; flex-direction: column; gap: 20px;">
+          <div class="section-banner">
+            <h2>2D Polygon Clipping &amp; Healing Benchmark Suite</h2>
+            <span>polystrata vs. manifold-3d (CrossSection) &bull; clipper2-js &bull; polygon-clipping &bull; martinez &bull; polybool</span>
+          </div>
 
-        <!-- Adversarial Fuzz Torture Table -->
-        <section class="bench-grid-section">
-          <h2>Adversarial Fuzz Torture Benchmark (120 Degenerate Polygon Pairs &times; 4 Ops = 480 Boolean Ops)</h2>
-          <p class="sub">
-            Tests random self-intersecting bowties, near-collinear edges, coincident vertices (10<sup>-10</sup> jitter),
-            and verifies exact Boolean Inclusion-Exclusion Area Identities:
-            <code>Area(A &cup; B) + Area(A &cap; B) = Area(A) + Area(B)</code> and
-            <code>Area(A \ B) + Area(A &cap; B) = Area(A)</code>.
-          </p>
-          <table class="bench-table">
-            <thead>
-              <tr>
-                <th>Library</th>
-                <th class="num">Throughput</th>
-                <th class="num">Total Time</th>
-                <th class="num">Area Identity Pass Rate</th>
-                <th class="num">Crashes</th>
-                <th class="num">Silent Area Failures</th>
-                <th>Robustness Verdict</th>
-              </tr>
-            </thead>
-            <tbody id="fuzz-tbody"></tbody>
-          </table>
-        </section>
+          <div id="lib-cards" class="lib-cards"></div>
 
-        <!-- Per-Workload Breakdown Table -->
-        <section class="bench-grid-section">
-          <h2>Workload-by-Workload Performance &amp; Numerical Accuracy (11 Workloads Across 3 Categories)</h2>
-          <p class="sub">
-            Each sample executes all 4 Boolean operations (<code>union</code>, <code>intersect</code>,
-            <code>difference</code>, <code>xor</code>) and reports per-operation throughput, latency percentiles, and
-            maximum inclusion-exclusion area error.
-          </p>
-          <table class="bench-table">
-            <thead>
-              <tr>
-                <th>Library</th>
-                <th class="num">Ops / sec</th>
-                <th class="bar-cell">Relative Speed</th>
-                <th class="num">Mean (ms)</th>
-                <th class="num">p50 (ms)</th>
-                <th class="num">p95 (ms)</th>
-                <th class="num">Area Identity Err</th>
-                <th>Status</th>
-              </tr>
-            </thead>
-            <tbody id="workload-tbody"></tbody>
-          </table>
-        </section>
+          <section class="bench-grid-section">
+            <h2>2D Adversarial Fuzz Torture Benchmark (120 Degenerate Polygon Pairs &times; 4 Ops = 480 Boolean Ops)</h2>
+            <p class="sub">
+              Tests random self-intersecting bowties, near-collinear edges, coincident vertices (10<sup>-10</sup> jitter),
+              and verifies exact Boolean Inclusion-Exclusion Area Identities:
+              <code>Area(A &cup; B) + Area(A &cap; B) = Area(A) + Area(B)</code> and
+              <code>Area(A \ B) + Area(A &cap; B) = Area(A)</code>.
+            </p>
+            <table class="bench-table">
+              <thead>
+                <tr>
+                  <th>Library</th>
+                  <th class="num">Throughput</th>
+                  <th class="num">Total Time</th>
+                  <th class="num">Area Identity Pass Rate</th>
+                  <th class="num">Crashes</th>
+                  <th class="num">Silent Area Failures</th>
+                  <th>Robustness Verdict</th>
+                </tr>
+              </thead>
+              <tbody id="fuzz-tbody"></tbody>
+            </table>
+          </section>
+
+          <section class="bench-grid-section">
+            <h2>2D Workload-by-Workload Performance &amp; Numerical Accuracy (11 Workloads Across 3 Categories)</h2>
+            <p class="sub">
+              Each sample executes all 4 Boolean operations (<code>union</code>, <code>intersect</code>,
+              <code>difference</code>, <code>xor</code>) and reports per-operation throughput, latency percentiles, and
+              maximum inclusion-exclusion area error.
+            </p>
+            <table class="bench-table">
+              <thead>
+                <tr>
+                  <th>Library</th>
+                  <th class="num">Ops / sec</th>
+                  <th class="bar-cell">Relative Speed</th>
+                  <th class="num">Mean (ms)</th>
+                  <th class="num">p50 (ms)</th>
+                  <th class="num">p95 (ms)</th>
+                  <th class="num">Area Identity Err</th>
+                  <th>Status</th>
+                </tr>
+              </thead>
+              <tbody id="workload-tbody"></tbody>
+            </table>
+          </section>
+        </div>
       </main>
     </div>
 
