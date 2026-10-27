@@ -2,277 +2,285 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>polystrata — 2D Stratified Tolerance Complex &amp; Boolean Kernel</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <title>polystrata — 2D Boolean kernel</title>
+    <script>
+      try {
+        const t = localStorage.getItem("polystrata-theme");
+        if (t === "light" || t === "dark") document.documentElement.dataset.theme = t;
+      } catch {}
+    </script>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      rel="stylesheet"
+      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap"
+    />
     <link rel="stylesheet" href="/demo/style.css" />
   </head>
-  <body>
-    <div class="app-shell">
-      <!-- Top Header -->
-      <header class="topbar">
-        <div class="brand">
-          <div class="brand-badge">POLYSTRATA</div>
-          <div>
-            <h1>polystrata &mdash; Stratified Tolerance Complex Kernel</h1>
-            <p class="subtitle">
-              4-Stage Snapped Consolidation &bull; Planar Half-Edge Wiring &bull; Left-Normal Winding Classification
-            </p>
-          </div>
-        </div>
+  <body class="lab">
+    <div class="app">
+      <header class="header">
+        <a class="wordmark" href="/">polystrata <span>2D</span></a>
 
-        <div class="mode-tabs" role="tablist">
-          <button id="tab-examples" class="mode-tab active" role="tab" aria-selected="true">
-            Interactive Examples (14)
-          </button>
-          <button id="tab-fuzzer" class="mode-tab" role="tab" aria-selected="false">
-            Interactive Fuzzer &amp; Invariant Lab
-          </button>
-          <a href="/benchmark.html" class="mode-tab" style="text-decoration: none; display: inline-flex; align-items: center;">
-            JS Clipping Benchmark Suite &rarr;
-          </a>
-          <a href="https://github.com/pboyer/polystrata" target="_blank" rel="noopener noreferrer" class="mode-tab" style="text-decoration: none; display: inline-flex; align-items: center;">
-            GitHub &#8599;
-          </a>
-        </div>
+        <nav class="tabs desktop-only" role="tablist">
+          <button id="tab-examples" class="tab active" role="tab" aria-selected="true">Examples</button>
+          <button id="tab-fuzzer" class="tab" role="tab" aria-selected="false">Fuzzer</button>
+          <a href="/benchmark.html" class="tab">Benchmark</a>
+        </nav>
 
-        <div class="topbar-metrics">
-          <div class="metric-pill">
-            <span class="metric-label">Solve Time</span>
-            <span id="metric-time" class="metric-value">0.00 ms</span>
-          </div>
-          <div class="metric-pill">
-            <span class="metric-label">Active V / E</span>
-            <span id="metric-ve" class="metric-value">0 / 0</span>
-          </div>
-          <div class="metric-pill">
-            <span class="metric-label">Polygons / Loops</span>
-            <span id="metric-loops" class="metric-value">0 / 0</span>
-          </div>
-          <div class="metric-pill">
-            <span class="metric-label">Signed Area</span>
-            <span id="metric-area" class="metric-value">0.00</span>
-          </div>
+        <div class="header-actions">
+          <button id="btn-theme" class="icon-btn" aria-label="Toggle theme"></button>
+          <a
+            href="https://github.com/pboyer/polystrata"
+            target="_blank"
+            rel="noopener noreferrer"
+            class="icon-btn"
+            aria-label="GitHub repository"
+            title="GitHub"
+          >
+            <i data-lucide="github"></i>
+          </a>
         </div>
       </header>
 
-      <div class="main-layout">
-        <!-- Left Sidebar: Examples List OR Fuzzer Controls -->
-        <aside class="sidebar left-sidebar">
-          <!-- EXAMPLES SIDEBAR PANEL -->
-          <div id="panel-examples" class="sidebar-panel">
-            <div class="section-header">
-              <h2>Preset Scenarios</h2>
-              <span class="badge-hint">Click to load</span>
+      <div class="layout">
+        <!-- Left: scenario list or fuzzer (desktop) -->
+        <aside class="sidebar left desktop-only">
+          <div id="panel-examples" class="panel">
+            <div class="section" style="padding-bottom: 0; border-bottom: none">
+              <div class="section-head">
+                <h2>Scenarios</h2>
+              </div>
             </div>
             <div id="example-list" class="example-list"></div>
           </div>
 
-          <!-- FUZZER SIDEBAR PANEL -->
-          <div id="panel-fuzzer" class="sidebar-panel hidden">
-            <div class="section-header">
-              <h2>Automated Fuzzer</h2>
-              <span id="fuzz-status-badge" class="status-badge idle">IDLE</span>
-            </div>
+          <div id="panel-fuzzer" class="panel hidden">
+            <div class="section">
+              <div class="section-head">
+                <h2>Fuzzer</h2>
+                <span id="fuzz-status-badge" class="status-badge idle">Idle</span>
+              </div>
 
-            <div class="fuzz-action-row">
-              <button id="btn-fuzz-toggle" class="btn btn-primary">▶ Start Continuous</button>
-              <button id="btn-fuzz-step" class="btn">Step 1</button>
-              <button id="btn-fuzz-burst" class="btn">+100 Trials</button>
-              <button id="btn-fuzz-reset" class="btn btn-subtle">Reset</button>
-            </div>
+              <div class="fuzz-action-row">
+                <button id="btn-fuzz-toggle" class="btn btn-primary">Run</button>
+                <button id="btn-fuzz-step" class="btn">Step</button>
+                <button id="btn-fuzz-burst" class="btn">+100</button>
+                <button id="btn-fuzz-reset" class="btn">Reset</button>
+              </div>
 
-            <div class="control-group">
-              <label class="control-label">
-                <span>PRNG Seed</span>
-                <input id="input-fuzz-seed" type="number" value="195939070" class="num-input" />
-              </label>
-              <label class="control-label">
-                <span>Vertices per Polygon</span>
-                <span id="val-fuzz-verts" class="mono-val">3 – 9</span>
-              </label>
-              <input id="slider-fuzz-verts" type="range" min="4" max="18" value="9" />
+              <div class="control-group">
+                <label class="control-label">
+                  <span>Seed</span>
+                  <input id="input-fuzz-seed" type="number" value="195939070" class="num-input" />
+                </label>
+                <label class="control-label">
+                  <span>Vertices per polygon</span>
+                  <span id="val-fuzz-verts" class="mono-val">3 – 9</span>
+                </label>
+                <input id="slider-fuzz-verts" type="range" min="4" max="18" value="9" />
 
-              <label class="control-label">
-                <span>Adversarial Degeneracy Rate</span>
-                <span id="val-fuzz-degen" class="mono-val">40%</span>
-              </label>
-              <input id="slider-fuzz-degen" type="range" min="0" max="100" value="40" />
+                <label class="control-label">
+                  <span>Degeneracy rate</span>
+                  <span id="val-fuzz-degen" class="mono-val">40%</span>
+                </label>
+                <input id="slider-fuzz-degen" type="range" min="0" max="100" value="40" />
 
-              <label class="control-label">
-                <span>Display Operation on Canvas</span>
-              </label>
-              <div class="segmented-row" id="fuzz-op-selector">
-                <button data-op="union" class="seg-btn active">Union</button>
-                <button data-op="intersect" class="seg-btn">Intersect</button>
-                <button data-op="difference" class="seg-btn">A \ B</button>
-                <button data-op="xor" class="seg-btn">XOR</button>
+                <label class="control-label">Displayed operation</label>
+                <div class="segmented-row" id="fuzz-op-selector">
+                  <button data-op="union" class="seg-btn active">Union</button>
+                  <button data-op="intersect" class="seg-btn">Intersect</button>
+                  <button data-op="difference" class="seg-btn">A − B</button>
+                  <button data-op="xor" class="seg-btn">XOR</button>
+                </div>
               </div>
             </div>
 
-            <div class="section-header">
-              <h2>Invariant Scorecard</h2>
-              <span id="fuzz-rate" class="badge-hint">0 ops/s</span>
+            <div class="section">
+              <div class="section-head">
+                <h2>Invariants</h2>
+                <span id="fuzz-rate" class="hint">0 ops/s</span>
+              </div>
+
+              <div class="scorecard-grid">
+                <div class="score-card">
+                  <span class="score-title">Trials</span>
+                  <span id="score-trials" class="score-num">0</span>
+                  <span id="score-ops" class="score-sub">0 Boolean ops</span>
+                </div>
+                <div class="score-card">
+                  <span class="score-title">Manifold (&part;<sub>1</sub> = 0)</span>
+                  <span id="score-manifold" class="score-num pass">0 / 0</span>
+                  <span class="score-sub">in-degree = out-degree</span>
+                </div>
+                <div class="score-card">
+                  <span class="score-title">Crossing-free</span>
+                  <span id="score-crossing" class="score-num pass">0 / 0</span>
+                  <span class="score-sub">no interior intersections</span>
+                </div>
+                <div class="score-card">
+                  <span class="score-title">Area identities</span>
+                  <span id="score-area" class="score-num pass">0 / 0</span>
+                  <span class="score-sub">|A&cup;B| + |A&cap;B| = |A| + |B|</span>
+                </div>
+                <div class="score-card wide">
+                  <span class="score-title">Winding oracle</span>
+                  <span id="score-winding" class="score-num pass">0 / 0</span>
+                  <span class="score-sub">analytic winding vs. output parity</span>
+                </div>
+              </div>
             </div>
 
-            <div class="scorecard-grid">
-              <div class="score-card">
-                <span class="score-title">Trials Executed</span>
-                <span id="score-trials" class="score-num">0</span>
-                <span id="score-ops" class="score-sub">0 Boolean evaluations</span>
+            <div class="section">
+              <div class="section-head">
+                <h2>Recent trials</h2>
+                <button id="btn-load-fuzz-into-editor" class="btn-inline">Edit current</button>
               </div>
-              <div class="score-card">
-                <span class="score-title">Manifold (&part;<sub>1</sub> = 0)</span>
-                <span id="score-manifold" class="score-num pass">0 / 0</span>
-                <span class="score-sub">inDeg == outDeg &amp; simple</span>
-              </div>
-              <div class="score-card">
-                <span class="score-title">Crossing-Free</span>
-                <span id="score-crossing" class="score-num pass">0 / 0</span>
-                <span class="score-sub">0 interior intersections</span>
-              </div>
-              <div class="score-card">
-                <span class="score-title">Area Identities</span>
-                <span id="score-area" class="score-num pass">0 / 0</span>
-                <span class="score-sub">|A&cup;B| + |A&cap;B| = |A| + |B|</span>
-              </div>
-              <div class="score-card wide">
-                <span class="score-title">Point-in-Polygon Winding Oracle</span>
-                <span id="score-winding" class="score-num pass">0 / 0</span>
-                <span class="score-sub">Analytical winding vs. B-Rep output parity</span>
-              </div>
+              <div id="fuzz-history-list" class="fuzz-history-list"></div>
             </div>
-
-            <div class="section-header">
-              <h2>Recent Fuzz Trials</h2>
-              <button id="btn-load-fuzz-into-editor" class="btn-inline">Edit Current in Lab &rarr;</button>
-            </div>
-            <div id="fuzz-history-list" class="fuzz-history-list"></div>
           </div>
         </aside>
 
-        <!-- Center Interactive Canvas -->
-        <main class="canvas-stage">
-          <div class="canvas-toolbar">
-            <div class="toolbar-left">
-              <span id="active-scenario-title" class="scenario-title">Scenario</span>
-              <span class="toolbar-divider">|</span>
-              <span class="drag-hint">
-                Drag vertices or bodies directly &bull; Scroll to zoom &bull; Space+Drag or Middle-Drag to pan
-              </span>
-            </div>
-            <div class="toolbar-right">
-              <button id="btn-reset-geometry" class="btn btn-sm">Reset Geometry</button>
-              <button id="btn-fit-view" class="btn btn-sm">Fit View</button>
-            </div>
+        <!-- Center: canvas -->
+        <main class="stage">
+          <div class="stage-head">
+            <h1 id="active-scenario-title" class="scenario-title">Scenario</h1>
+            <p id="scenario-description" class="scenario-footer"></p>
           </div>
 
           <div class="canvas-container">
             <canvas id="kernel-canvas"></canvas>
 
-            <!-- Floating Cursor Probe Overlay -->
-            <div id="cursor-probe" class="cursor-probe">
-              <div><span class="probe-key">World:</span> <span id="probe-xy">(0.00, 0.00)</span></div>
-              <div><span class="probe-key">Winding:</span> <span id="probe-winding">wA=0, wB=0</span></div>
-              <div><span class="probe-key">In Output:</span> <span id="probe-inside">false</span></div>
+            <div class="overlay metrics">
+              <span class="metric"><span id="metric-time" class="metric-value">0.00 ms</span></span>
+              <span class="metric desktop-only">V/E <span id="metric-ve" class="metric-value">0 / 0</span></span>
+              <span class="metric desktop-only">Polygons <span id="metric-loops" class="metric-value">0</span></span>
+              <span class="metric">Area <span id="metric-area" class="metric-value">0.00</span></span>
             </div>
 
-            <!-- Legend Overlay -->
-            <div class="canvas-legend">
-              <span class="legend-item"><i class="dot body-a"></i> Body A</span>
-              <span class="legend-item"><i class="dot body-b"></i> Body B</span>
-              <span class="legend-item"><i class="dot body-c"></i> Body C</span>
-              <span class="legend-item"><i class="dot out-shell"></i> CCW Outer Shell</span>
-              <span class="legend-item"><i class="dot out-hole"></i> CW Hole</span>
-              <span class="legend-item"><i class="dot sample-pt"></i> Left-Normal Sample</span>
+            <div id="cursor-probe" class="overlay cursor-probe desktop-only">
+              <div><span class="probe-key">xy</span> <span id="probe-xy">(0.00, 0.00)</span></div>
+              <div><span class="probe-key">w</span> <span id="probe-winding">wA=0, wB=0</span></div>
+              <div><span class="probe-key">in</span> <span id="probe-inside">false</span></div>
+            </div>
+
+            <div class="overlay canvas-legend">
+              <span class="legend-item"><i class="dot body-a"></i>A</span>
+              <span class="legend-item"><i class="dot body-b"></i>B</span>
+              <span class="legend-item"><i class="dot body-c"></i>C</span>
+              <span class="legend-item"><i class="dot out-shell"></i>Shell</span>
+              <span class="legend-item"><i class="dot out-hole"></i>Hole</span>
+              <span class="legend-item desktop-only"><i class="dot sample-pt"></i>Sample</span>
+            </div>
+
+            <div class="canvas-actions">
+              <button id="btn-reset-geometry" class="icon-btn" title="Reset geometry" aria-label="Reset geometry">
+                <i data-lucide="rotate-ccw"></i>
+              </button>
+              <button id="btn-fit-view" class="icon-btn" title="Fit view" aria-label="Fit view">
+                <i data-lucide="maximize"></i>
+              </button>
+            </div>
+          </div>
+        </main>
+
+        <!-- Right: kernel controls (operation only on mobile) -->
+        <aside class="sidebar right">
+          <div class="section mobile-only">
+            <div class="picker">
+              <button id="btn-scenario-prev" class="icon-btn" aria-label="Previous scenario">
+                <i data-lucide="chevron-left"></i>
+              </button>
+              <select id="scenario-select" class="picker-select" aria-label="Scenario"></select>
+              <button id="btn-scenario-next" class="icon-btn" aria-label="Next scenario">
+                <i data-lucide="chevron-right"></i>
+              </button>
             </div>
           </div>
 
-          <div id="scenario-description" class="scenario-footer"></div>
-        </main>
-
-        <!-- Right Sidebar: Kernel Controls & Pipeline Inspector -->
-        <aside class="sidebar right-sidebar">
-          <div class="sidebar-panel">
-            <div class="section-header">
-              <h2>Boolean &amp; Winding</h2>
+          <div class="section">
+            <div class="section-head desktop-only">
+              <h2>Operation</h2>
             </div>
-
-            <div class="control-group">
-              <label class="control-label">Boolean Operation</label>
-              <div class="op-grid" id="op-selector">
-                <button data-op="union" class="op-btn active">Union (A &cup; B)</button>
-                <button data-op="intersect" class="op-btn">Intersect (A &cap; B)</button>
-                <button data-op="difference" class="op-btn">Diff (A \ B)</button>
-                <button data-op="xor" class="op-btn">XOR (A &oplus; B)</button>
-                <button data-op="heal" class="op-btn">Heal (All Input)</button>
-                <button data-op="custom3" class="op-btn">(A &cup; B) \ C</button>
-              </div>
+            <div class="op-grid" id="op-selector">
+              <button data-op="union" class="op-btn active">Union<span class="sym">A&cup;B</span></button>
+              <button data-op="intersect" class="op-btn">Intersect<span class="sym">A&cap;B</span></button>
+              <button data-op="difference" class="op-btn">Difference<span class="sym">A&minus;B</span></button>
+              <button data-op="xor" class="op-btn">XOR<span class="sym">A&oplus;B</span></button>
+              <button data-op="heal" class="op-btn">Heal</button>
+              <button data-op="custom3" class="op-btn">(A&cup;B)&minus;C</button>
             </div>
+          </div>
 
-            <div class="control-group">
-              <label class="control-label">Winding Rule</label>
-              <div class="segmented-row" id="winding-selector">
-                <button data-rule="positive" class="seg-btn active">positive</button>
-                <button data-rule="nonZero" class="seg-btn">nonZero</button>
-                <button data-rule="evenOdd" class="seg-btn">evenOdd</button>
-              </div>
+          <div class="section desktop-only">
+            <div class="section-head">
+              <h2>Winding rule</h2>
             </div>
-
-            <div class="section-header">
-              <h2>Tolerance &amp; Simplification</h2>
+            <div class="segmented-row" id="winding-selector">
+              <button data-rule="positive" class="seg-btn active">Positive</button>
+              <button data-rule="nonZero" class="seg-btn">Non-zero</button>
+              <button data-rule="evenOdd" class="seg-btn">Even-odd</button>
             </div>
+          </div>
 
+          <div class="section desktop-only">
+            <div class="section-head">
+              <h2>Tolerance</h2>
+            </div>
             <div class="control-group">
               <label class="control-label">
-                <span>Snap Tolerance (r<sub>0</sub>)</span>
+                <span>Snap r<sub>0</sub></span>
                 <span id="val-snap-tol" class="mono-val">Auto</span>
               </label>
               <input id="slider-snap-tol" type="range" min="-9" max="0.5" step="0.05" value="-9" />
-              <div class="QuickTolRow">
-                <button id="btn-tol-auto" class="btn-chip active">Auto (10<sup>-9</sup> L)</button>
+              <div class="chip-row">
+                <button id="btn-tol-auto" class="btn-chip active">Auto</button>
                 <button id="btn-tol-micro" class="btn-chip">10<sup>-4</sup></button>
                 <button id="btn-tol-coarse" class="btn-chip">0.25</button>
               </div>
-
               <label class="checkbox-row">
                 <input id="chk-simplify-collinear" type="checkbox" checked />
-                <span>Simplify Collinear Degree-2 Vertices</span>
+                <span>Simplify collinear vertices</span>
               </label>
             </div>
+          </div>
 
-            <div class="section-header">
-              <h2>Pipeline Layers</h2>
+          <div class="section desktop-only">
+            <div class="section-head">
+              <h2>Layers</h2>
             </div>
-
-            <div class="control-group layer-toggles">
+            <div class="control-group">
               <label class="checkbox-row">
                 <input id="chk-layer-input" type="checkbox" checked />
-                <span>Raw Input Geometry &amp; Handles</span>
+                <span>Input geometry &amp; handles</span>
               </label>
               <label class="checkbox-row">
                 <input id="chk-layer-output-fill" type="checkbox" checked />
-                <span>Output Polygons &amp; Holes Fill</span>
+                <span>Output fill</span>
               </label>
               <label class="checkbox-row">
                 <input id="chk-layer-output-edges" type="checkbox" checked />
-                <span>Output Oriented Half-Edges &amp; Vertices</span>
+                <span>Output half-edges</span>
               </label>
               <label class="checkbox-row">
                 <input id="chk-layer-consolidated" type="checkbox" />
-                <span>Stage 1–2 Consolidated Graph &amp; &Delta;w</span>
+                <span>Consolidated graph &amp; &Delta;w</span>
               </label>
               <label class="checkbox-row">
                 <input id="chk-layer-radii" type="checkbox" />
-                <span>Stage 1 Vertex Tolerance Disks r(v)</span>
+                <span>Vertex tolerance disks</span>
               </label>
               <label class="checkbox-row">
                 <input id="chk-layer-samples" type="checkbox" checked />
-                <span>Stage 4 Left-Normal Sample Points</span>
+                <span>Left-normal samples</span>
               </label>
             </div>
+          </div>
 
-            <div class="section-header">
-              <h2>4-Stage Pipeline Diagnostics</h2>
+          <div class="section desktop-only">
+            <div class="section-head">
+              <h2>Diagnostics</h2>
             </div>
             <div id="pipeline-diagnostics" class="diagnostics-box"></div>
           </div>

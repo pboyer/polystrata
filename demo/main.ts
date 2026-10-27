@@ -23,6 +23,7 @@ import {
   rawLoopWindingNumber,
   runSingleFuzzTrial,
 } from "./fuzzer.js";
+import { alpha, initTheme, onThemeChange, palette } from "./theme.js";
 
 interface PipelineRunSnapshot {
   inspection: PipelineInspection;
@@ -305,10 +306,29 @@ function syncControlsFromState(): void {
   (document.getElementById("chk-layer-radii") as HTMLInputElement).checked = showLayerRadii;
   (document.getElementById("chk-layer-samples") as HTMLInputElement).checked = showLayerSamples;
 
+  document.getElementById("btn-tol-auto")!.classList.toggle("active", customSnapTolerance === null);
+  document.getElementById("btn-tol-micro")!.classList.toggle("active", customSnapTolerance === 1e-4);
+  document.getElementById("btn-tol-coarse")!.classList.toggle("active", customSnapTolerance === 0.25);
+
   document.querySelectorAll(".example-card").forEach((card) => {
     const el = card as HTMLElement;
     el.classList.toggle("active", el.dataset.id === currentScenario.id);
   });
+  (document.getElementById("scenario-select") as HTMLSelectElement).value = currentScenario.id;
+}
+
+function setActiveTab(tab: "examples" | "fuzzer"): void {
+  activeTab = tab;
+  for (const [id, name] of [
+    ["tab-examples", "examples"],
+    ["tab-fuzzer", "fuzzer"],
+  ] as const) {
+    const el = document.getElementById(id)!;
+    el.classList.toggle("active", name === tab);
+    el.setAttribute("aria-selected", String(name === tab));
+  }
+  document.getElementById("panel-examples")!.classList.toggle("hidden", tab !== "examples");
+  document.getElementById("panel-fuzzer")!.classList.toggle("hidden", tab !== "fuzzer");
 }
 
 function updateMetricsAndDiagnostics(snap: PipelineRunSnapshot): void {
@@ -354,19 +374,20 @@ function drawGrid(w: number, h: number): void {
   const startY = Math.floor(bottomRight.y / step) * step;
   const endY = Math.ceil(topLeft.y / step) * step;
 
+  const pal = palette();
   ctx2d.lineWidth = 1;
-  ctx2d.font = "10px 'JetBrains Mono', monospace";
+  ctx2d.font = "10px Inter, sans-serif";
 
   for (let gx = startX; gx <= endX; gx += step) {
     const sx = worldToScreen(gx, 0).x;
     const isZero = Math.abs(gx) < step * 1e-6;
-    ctx2d.strokeStyle = isZero ? "rgba(56, 189, 248, 0.28)" : "rgba(148, 163, 184, 0.08)";
+    ctx2d.strokeStyle = isZero ? pal.axis : pal.grid;
     ctx2d.beginPath();
     ctx2d.moveTo(sx, 0);
     ctx2d.lineTo(sx, h);
     ctx2d.stroke();
 
-    ctx2d.fillStyle = "rgba(148, 163, 184, 0.42)";
+    ctx2d.fillStyle = pal.gridLabel;
     const label = Math.abs(gx) >= 1e5 ? gx.toFixed(0) : Number(gx.toPrecision(6)).toString();
     ctx2d.fillText(label, sx + 4, h - 6);
   }
@@ -374,13 +395,13 @@ function drawGrid(w: number, h: number): void {
   for (let gy = startY; gy <= endY; gy += step) {
     const sy = worldToScreen(0, gy).y;
     const isZero = Math.abs(gy) < step * 1e-6;
-    ctx2d.strokeStyle = isZero ? "rgba(56, 189, 248, 0.28)" : "rgba(148, 163, 184, 0.08)";
+    ctx2d.strokeStyle = isZero ? pal.axis : pal.grid;
     ctx2d.beginPath();
     ctx2d.moveTo(0, sy);
     ctx2d.lineTo(w, sy);
     ctx2d.stroke();
 
-    ctx2d.fillStyle = "rgba(148, 163, 184, 0.42)";
+    ctx2d.fillStyle = pal.gridLabel;
     const label = Math.abs(gy) >= 1e5 ? gy.toFixed(0) : Number(gy.toPrecision(6)).toString();
     ctx2d.fillText(label, 6, sy - 4);
   }
@@ -442,7 +463,7 @@ function drawEditableBody(body: EditableBody, strokeColor: string, fillColor: st
     const isHovered = p === hoveredPointRef || (dragTarget?.pointRef === p);
     ctx2d.beginPath();
     ctx2d.arc(s.x, s.y, isHovered ? 6 : 3.6, 0, Math.PI * 2);
-    ctx2d.fillStyle = isHovered ? "#ffffff" : strokeColor;
+    ctx2d.fillStyle = isHovered ? palette().bg : strokeColor;
     ctx2d.fill();
     if (isHovered) {
       ctx2d.lineWidth = 2;
@@ -467,6 +488,7 @@ function drawConsolidatedComplex(snap: PipelineRunSnapshot): void {
   const { vertexCount, edgeCount, bodyCount, vx, vy, vr, vAlive, ev0, ev1, eAlive, eDeltaW } =
     complex;
   const { cx, cy } = normalization;
+  const pal = palette();
   ctx2d.save();
 
   if (showLayerRadii) {
@@ -476,8 +498,8 @@ function drawConsolidatedComplex(snap: PipelineRunSnapshot): void {
       const radiusPx = Math.max(4, vr[v]! * view.scale);
       ctx2d.beginPath();
       ctx2d.arc(s.x, s.y, radiusPx, 0, Math.PI * 2);
-      ctx2d.fillStyle = "rgba(250, 204, 21, 0.14)";
-      ctx2d.strokeStyle = "rgba(250, 204, 21, 0.65)";
+      ctx2d.fillStyle = alpha(pal.sample, 0.12);
+      ctx2d.strokeStyle = pal.radius;
       ctx2d.lineWidth = 1;
       ctx2d.fill();
       ctx2d.stroke();
@@ -485,7 +507,7 @@ function drawConsolidatedComplex(snap: PipelineRunSnapshot): void {
   }
 
   if (showLayerConsolidated) {
-    ctx2d.font = "10px 'JetBrains Mono', monospace";
+    ctx2d.font = "10px Inter, sans-serif";
     for (let e = 0; e < edgeCount; e++) {
       if (!eAlive[e]) continue;
       const u = ev0[e]!;
@@ -501,7 +523,7 @@ function drawConsolidatedComplex(snap: PipelineRunSnapshot): void {
           break;
         }
       }
-      ctx2d.strokeStyle = nonZeroDelta ? "rgba(244, 114, 182, 0.85)" : "rgba(148, 163, 184, 0.5)";
+      ctx2d.strokeStyle = nonZeroDelta ? pal.deltaW : pal.edgeNeutral;
       ctx2d.lineWidth = nonZeroDelta ? 1.8 : 1.2;
       ctx2d.beginPath();
       ctx2d.moveTo(s0.x, s0.y);
@@ -514,7 +536,7 @@ function drawConsolidatedComplex(snap: PipelineRunSnapshot): void {
         const d0 = eDeltaW[base] ?? 0;
         const d1 = bodyCount > 1 ? (eDeltaW[base + 1] ?? 0) : 0;
         const label = bodyCount > 1 ? `Δw=[${d0},${d1}]` : `Δw=[${d0}]`;
-        ctx2d.fillStyle = "#f472b6";
+        ctx2d.fillStyle = pal.deltaW;
         ctx2d.fillText(label, mx + 3, my - 3);
       }
     }
@@ -524,16 +546,11 @@ function drawConsolidatedComplex(snap: PipelineRunSnapshot): void {
 }
 
 function drawOutputBRep(result: KernelResult): void {
+  const pal = palette();
   ctx2d.save();
 
   // 1. Fill polygons with holes using Canvas evenodd subpath rule
   if (showLayerOutputFill) {
-    const palette = [
-      "rgba(52, 211, 153, 0.24)",
-      "rgba(56, 189, 248, 0.24)",
-      "rgba(192, 132, 252, 0.24)",
-      "rgba(251, 191, 36, 0.24)",
-    ];
     for (let pIdx = 0; pIdx < result.polygons.length; pIdx++) {
       const poly = result.polygons[pIdx]!;
       ctx2d.beginPath();
@@ -552,7 +569,7 @@ function drawOutputBRep(result: KernelResult): void {
         traceRing(hole);
       }
 
-      ctx2d.fillStyle = palette[pIdx % palette.length]!;
+      ctx2d.fillStyle = pal.fills[pIdx % pal.fills.length]!;
       ctx2d.fill("evenodd");
     }
   }
@@ -562,10 +579,10 @@ function drawOutputBRep(result: KernelResult): void {
     for (const loop of result.loops) {
       const area = signedLoopArea(loop);
       const isOuter = area > 0;
-      const color = isOuter ? "#34d399" : "#fb7185";
+      const color = isOuter ? pal.shell : pal.hole;
       ctx2d.strokeStyle = color;
       ctx2d.fillStyle = color;
-      ctx2d.lineWidth = 2.4;
+      ctx2d.lineWidth = 1.75;
 
       const n = loop.length;
       ctx2d.beginPath();
@@ -584,7 +601,7 @@ function drawOutputBRep(result: KernelResult): void {
         drawArrowhead(s0.x, s0.y, s1.x, s1.y, 7);
 
         ctx2d.beginPath();
-        ctx2d.arc(s0.x, s0.y, 3.2, 0, Math.PI * 2);
+        ctx2d.arc(s0.x, s0.y, 2.6, 0, Math.PI * 2);
         ctx2d.fill();
       }
     }
@@ -595,21 +612,22 @@ function drawOutputBRep(result: KernelResult): void {
 
 function drawSamplePoints(snap: PipelineRunSnapshot): void {
   if (!showLayerSamples) return;
+  const pal = palette();
   ctx2d.save();
-  ctx2d.font = "10px 'JetBrains Mono', monospace";
+  ctx2d.font = "10px Inter, sans-serif";
 
   for (const diag of snap.diagnostics) {
     const s = worldToScreen(diag.samplePoint.x, diag.samplePoint.y);
     ctx2d.beginPath();
     ctx2d.arc(s.x, s.y, 3.8, 0, Math.PI * 2);
-    ctx2d.fillStyle = diag.keep ? "#facc15" : "rgba(148, 163, 184, 0.55)";
+    ctx2d.fillStyle = diag.keep ? pal.sample : pal.sampleDiscarded;
     ctx2d.fill();
-    ctx2d.strokeStyle = "#0f172a";
+    ctx2d.strokeStyle = pal.bg;
     ctx2d.lineWidth = 1;
     ctx2d.stroke();
 
     const wText = `w=(${diag.windings.slice(0, 2).join(",")})`;
-    ctx2d.fillStyle = diag.keep ? "#fde047" : "rgba(148, 163, 184, 0.7)";
+    ctx2d.fillStyle = diag.keep ? pal.sample : pal.muted;
     ctx2d.fillText(wText, s.x + 6, s.y + 3);
   }
 
@@ -617,7 +635,7 @@ function drawSamplePoints(snap: PipelineRunSnapshot): void {
   if (activeTab === "fuzzer" && selectedFuzzTrial) {
     for (const probe of selectedFuzzTrial.probes) {
       const s = worldToScreen(probe.pt.x, probe.pt.y);
-      ctx2d.strokeStyle = probe.passed ? "rgba(52, 211, 153, 0.75)" : "#fb7185";
+      ctx2d.strokeStyle = probe.passed ? alpha(pal.ok, 0.75) : pal.bad;
       ctx2d.lineWidth = 1.4;
       ctx2d.beginPath();
       ctx2d.moveTo(s.x - 3.5, s.y);
@@ -646,9 +664,10 @@ function renderCanvas(): void {
   drawGrid(w, h);
 
   if (showLayerInput) {
-    drawEditableBody(bodyA, "#38bdf8", "rgba(56, 189, 248, 0.05)");
-    drawEditableBody(bodyB, "#fb923c", "rgba(251, 146, 60, 0.05)");
-    drawEditableBody(bodyC, "#c084fc", "rgba(192, 132, 252, 0.05)");
+    const pal = palette();
+    drawEditableBody(bodyA, pal.bodyA, alpha(pal.bodyA, 0.06));
+    drawEditableBody(bodyB, pal.bodyB, alpha(pal.bodyB, 0.06));
+    drawEditableBody(bodyC, pal.bodyC, alpha(pal.bodyC, 0.06));
   }
 
   if (latestSnapshot) {
@@ -665,8 +684,7 @@ function recomputeAndRender(): void {
 }
 
 // Hit testing for vertex handles and bodies
-function findHitVertex(screenX: number, screenY: number): Point2D | null {
-  const hitRadiusPx = 9;
+function findHitVertex(screenX: number, screenY: number, hitRadiusPx = 9): Point2D | null {
   let bestPt: Point2D | null = null;
   let bestDist = hitRadiusPx;
 
@@ -761,7 +779,7 @@ function updateCursorProbe(wx: number, wy: number): void {
   const insideEl = document.getElementById("probe-inside")!;
   const isIn = Math.abs(wOut) >= 0.5;
   insideEl.textContent = isIn ? `true (w=${Math.round(wOut)})` : "false";
-  insideEl.style.color = isIn ? "#34d399" : "#94a3b8";
+  insideEl.classList.toggle("ok", isIn);
 }
 
 // Fuzzer Execution & UI
@@ -812,8 +830,8 @@ function updateFuzzScorecardUI(): void {
     const row = document.createElement("div");
     row.className = `fuzz-item ${selectedFuzzTrial?.trialNumber === item.trialNumber ? "active" : ""}`;
     row.innerHTML = `
-      <span>#${item.trialNumber} &bull; V(${item.polyA.length},${item.polyB.length}) &bull; ΔA=${item.areaError.toExponential(1)}</span>
-      <span class="${item.allPassed ? "fuzz-pass" : "fuzz-fail"}">${item.allPassed ? "PASS" : "FAIL"}</span>
+      <span>#${item.trialNumber} · V(${item.polyA.length},${item.polyB.length}) · ΔA=${item.areaError.toExponential(1)}</span>
+      <span class="${item.allPassed ? "fuzz-pass" : "fuzz-fail"}">${item.allPassed ? "Pass" : "Fail"}</span>
     `;
     row.addEventListener("click", () => {
       displayFuzzTrialOnCanvas(item);
@@ -869,10 +887,10 @@ function stopContinuousFuzz(): void {
     fuzzAnimFrame = 0;
   }
   const btn = document.getElementById("btn-fuzz-toggle")!;
-  btn.textContent = "▶ Start Continuous";
+  btn.textContent = "Run";
   btn.classList.remove("running");
   const badge = document.getElementById("fuzz-status-badge")!;
-  badge.textContent = "IDLE";
+  badge.textContent = "Idle";
   badge.className = "status-badge idle";
 }
 
@@ -880,10 +898,10 @@ function startContinuousFuzz(): void {
   if (fuzzRunning) return;
   fuzzRunning = true;
   const btn = document.getElementById("btn-fuzz-toggle")!;
-  btn.textContent = "■ Pause Fuzzer";
+  btn.textContent = "Pause";
   btn.classList.add("running");
   const badge = document.getElementById("fuzz-status-badge")!;
-  badge.textContent = "RUNNING";
+  badge.textContent = "Running";
   badge.className = "status-badge running";
 
   const tick = () => {
@@ -898,6 +916,9 @@ function startContinuousFuzz(): void {
 
 // Initialize UI & Event Listeners
 function initUI(): void {
+  // Small screens have no layer toggles, so start with the less cluttered view.
+  if (window.matchMedia("(max-width: 860px)").matches) showLayerSamples = false;
+
   // Populate preset example cards
   const exampleListEl = document.getElementById("example-list")!;
   for (const scenario of DEMO_SCENARIOS) {
@@ -917,29 +938,37 @@ function initUI(): void {
     exampleListEl.appendChild(card);
   }
 
-  // Mode Tabs
-  const tabExamples = document.getElementById("tab-examples")!;
-  const tabFuzzer = document.getElementById("tab-fuzzer")!;
-  const panelExamples = document.getElementById("panel-examples")!;
-  const panelFuzzer = document.getElementById("panel-fuzzer")!;
+  // Compact scenario picker (mobile)
+  const scenarioSelect = document.getElementById("scenario-select") as HTMLSelectElement;
+  for (const scenario of DEMO_SCENARIOS) {
+    scenarioSelect.add(new Option(scenario.title, scenario.id));
+  }
+  const loadScenarioAt = (index: number) => {
+    const n = DEMO_SCENARIOS.length;
+    if (activeTab !== "examples") setActiveTab("examples");
+    loadScenario(DEMO_SCENARIOS[((index % n) + n) % n]!);
+  };
+  const currentScenarioIndex = () => DEMO_SCENARIOS.indexOf(currentScenario);
+  scenarioSelect.addEventListener("change", () => {
+    loadScenarioAt(DEMO_SCENARIOS.findIndex((s) => s.id === scenarioSelect.value));
+  });
+  document.getElementById("btn-scenario-prev")!.addEventListener("click", () => {
+    loadScenarioAt(currentScenarioIndex() - 1);
+  });
+  document.getElementById("btn-scenario-next")!.addEventListener("click", () => {
+    loadScenarioAt(currentScenarioIndex() + 1);
+  });
 
-  tabExamples.addEventListener("click", () => {
+  // Mode Tabs
+  document.getElementById("tab-examples")!.addEventListener("click", () => {
     stopContinuousFuzz();
-    activeTab = "examples";
-    tabExamples.classList.add("active");
-    tabFuzzer.classList.remove("active");
-    panelExamples.classList.remove("hidden");
-    panelFuzzer.classList.add("hidden");
+    setActiveTab("examples");
     syncControlsFromState();
     recomputeAndRender();
   });
 
-  tabFuzzer.addEventListener("click", () => {
-    activeTab = "fuzzer";
-    tabFuzzer.classList.add("active");
-    tabExamples.classList.remove("active");
-    panelFuzzer.classList.remove("hidden");
-    panelExamples.classList.add("hidden");
+  document.getElementById("tab-fuzzer")!.addEventListener("click", () => {
+    setActiveTab("fuzzer");
     if (fuzzHistory.length === 0) {
       executeFuzzBatch(1);
     } else if (selectedFuzzTrial) {
@@ -1099,11 +1128,7 @@ function initUI(): void {
 
   document.getElementById("btn-load-fuzz-into-editor")!.addEventListener("click", () => {
     stopContinuousFuzz();
-    activeTab = "examples";
-    tabExamples.classList.add("active");
-    tabFuzzer.classList.remove("active");
-    panelExamples.classList.remove("hidden");
-    panelFuzzer.classList.add("hidden");
+    setActiveTab("examples");
     syncControlsFromState();
     recomputeAndRender();
   });
@@ -1116,73 +1141,94 @@ function initUI(): void {
     if (e.code === "Space") spacePressed = false;
   });
 
-  canvas.addEventListener("mousedown", (e) => {
+  // Canvas pointer interactions: drag vertices or bodies, pan, and wheel / pinch zoom.
+  const activePointers = new Map<number, { x: number; y: number }>();
+  let pinch: { dist: number; midX: number; midY: number } | null = null;
+
+  const localPoint = (e: MouseEvent) => {
     const rect = canvas.getBoundingClientRect();
-    const sx = e.clientX - rect.left;
-    const sy = e.clientY - rect.top;
+    return { sx: e.clientX - rect.left, sy: e.clientY - rect.top, rect };
+  };
+
+  const zoomAt = (sx: number, sy: number, factor: number) => {
+    const before = screenToWorld(sx, sy);
+    view.scale = Math.max(1e-4, Math.min(1e6, view.scale * factor));
+    const after = screenToWorld(sx, sy);
+    view.centerX += before.x - after.x;
+    view.centerY += before.y - after.y;
+  };
+
+  const pinchState = () => {
+    const [a, b] = [...activePointers.values()] as [{ x: number; y: number }, { x: number; y: number }];
+    return {
+      dist: Math.max(1, Math.hypot(a.x - b.x, a.y - b.y)),
+      midX: 0.5 * (a.x + b.x),
+      midY: 0.5 * (a.y + b.y),
+    };
+  };
+
+  canvas.addEventListener("pointerdown", (e) => {
+    const { sx, sy } = localPoint(e);
+    activePointers.set(e.pointerId, { x: sx, y: sy });
+    canvas.setPointerCapture(e.pointerId);
+
+    if (activePointers.size === 2) {
+      // A second finger turns any drag into a pinch.
+      dragTarget = null;
+      pinch = pinchState();
+      return;
+    }
+    if (activePointers.size > 2) return;
+
     const wPt = screenToWorld(sx, sy);
+    const start = { startScreenX: sx, startScreenY: sy, lastWorldX: wPt.x, lastWorldY: wPt.y };
 
     if (e.button === 1 || spacePressed) {
-      dragTarget = {
-        kind: "pan",
-        startScreenX: sx,
-        startScreenY: sy,
-        lastWorldX: wPt.x,
-        lastWorldY: wPt.y,
-      };
+      dragTarget = { kind: "pan", ...start };
       canvas.style.cursor = "grabbing";
       return;
     }
 
-    const hitVertex = findHitVertex(sx, sy);
+    const hitVertex = findHitVertex(sx, sy, e.pointerType === "touch" ? 22 : 9);
     if (hitVertex) {
-      dragTarget = {
-        kind: "vertex",
-        pointRef: hitVertex,
-        startScreenX: sx,
-        startScreenY: sy,
-        lastWorldX: wPt.x,
-        lastWorldY: wPt.y,
-      };
+      dragTarget = { kind: "vertex", pointRef: hitVertex, ...start };
       canvas.style.cursor = "grabbing";
       return;
     }
 
     const hitBody = findHitBody(wPt.x, wPt.y);
     if (hitBody) {
-      dragTarget = {
-        kind: "body",
-        bodyRef: hitBody,
-        startScreenX: sx,
-        startScreenY: sy,
-        lastWorldX: wPt.x,
-        lastWorldY: wPt.y,
-      };
+      dragTarget = { kind: "body", bodyRef: hitBody, ...start };
       canvas.style.cursor = "move";
       return;
     }
 
-    dragTarget = {
-      kind: "pan",
-      startScreenX: sx,
-      startScreenY: sy,
-      lastWorldX: wPt.x,
-      lastWorldY: wPt.y,
-    };
+    dragTarget = { kind: "pan", ...start };
     canvas.style.cursor = "grabbing";
   });
 
-  window.addEventListener("mousemove", (e) => {
-    const rect = canvas.getBoundingClientRect();
-    const sx = e.clientX - rect.left;
-    const sy = e.clientY - rect.top;
+  canvas.addEventListener("pointermove", (e) => {
+    const { sx, sy, rect } = localPoint(e);
+    if (activePointers.has(e.pointerId)) activePointers.set(e.pointerId, { x: sx, y: sy });
+
+    if (pinch && activePointers.size >= 2) {
+      const next = pinchState();
+      view.centerX -= (next.midX - pinch.midX) / view.scale;
+      view.centerY += (next.midY - pinch.midY) / view.scale;
+      zoomAt(next.midX, next.midY, next.dist / pinch.dist);
+      pinch = next;
+      renderCanvas();
+      return;
+    }
+
     const wPt = screenToWorld(sx, sy);
 
-    if (sx >= 0 && sy >= 0 && sx <= rect.width && sy <= rect.height) {
+    if (e.pointerType === "mouse" && sx >= 0 && sy >= 0 && sx <= rect.width && sy <= rect.height) {
       updateCursorProbe(wPt.x, wPt.y);
     }
 
     if (!dragTarget) {
+      if (e.pointerType !== "mouse") return;
       const hitV = findHitVertex(sx, sy);
       if (hitV !== hoveredPointRef) {
         hoveredPointRef = hitV;
@@ -1220,37 +1266,37 @@ function initUI(): void {
     }
   });
 
-  window.addEventListener("mouseup", () => {
+  const endPointer = (e: PointerEvent) => {
+    activePointers.delete(e.pointerId);
+    if (activePointers.size < 2) pinch = null;
     if (dragTarget) {
       dragTarget = null;
       canvas.style.cursor = hoveredPointRef ? "grab" : "crosshair";
     }
-  });
+    if (e.pointerType !== "mouse" && hoveredPointRef) {
+      hoveredPointRef = null;
+      renderCanvas();
+    }
+  };
+  canvas.addEventListener("pointerup", endPointer);
+  canvas.addEventListener("pointercancel", endPointer);
 
   canvas.addEventListener(
     "wheel",
     (e) => {
       e.preventDefault();
-      const rect = canvas.getBoundingClientRect();
-      const sx = e.clientX - rect.left;
-      const sy = e.clientY - rect.top;
-      const before = screenToWorld(sx, sy);
-
-      const zoomFactor = Math.exp(-e.deltaY * 0.0014);
-      view.scale = Math.max(1e-4, Math.min(1e6, view.scale * zoomFactor));
-
-      const after = screenToWorld(sx, sy);
-      view.centerX += before.x - after.x;
-      view.centerY += before.y - after.y;
+      const { sx, sy } = localPoint(e);
+      zoomAt(sx, sy, Math.exp(-e.deltaY * 0.0014));
       renderCanvas();
     },
     { passive: false },
   );
 
-  window.addEventListener("resize", () => {
-    renderCanvas();
-  });
+  new ResizeObserver(() => renderCanvas()).observe(canvas);
 }
+
+initTheme();
+onThemeChange(renderCanvas);
 
 void initPolystrata().then(() => {
   initUI();

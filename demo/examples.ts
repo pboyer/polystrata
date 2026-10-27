@@ -105,7 +105,7 @@ export const DEMO_SCENARIOS: DemoScenario[] = [
     tag: "BOOLEAN",
     summary: "12-tooth mechanical gear with bore hole vs. 7-point star.",
     description:
-      "Drag the orange 7-point star (Body B) across the cyan 12-tooth gear (Body A) or switch between Union, Intersect, Difference, and XOR.",
+      "Drag the orange 7-point star (Body B) across the blue 12-tooth gear (Body A) or switch between Union, Intersect, Difference, and XOR.",
     defaultOp: "difference",
     defaultWindingRule: "positive",
     defaultSnapTolerance: null,

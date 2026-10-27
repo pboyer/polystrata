@@ -4,6 +4,18 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>2D Polygon Clipping Benchmark — polystrata vs. manifold-3d &amp; JS Clipping Libraries</title>
+    <script>
+      try {
+        const t = localStorage.getItem("polystrata-theme");
+        if (t === "light" || t === "dark") document.documentElement.dataset.theme = t;
+      } catch {}
+    </script>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      rel="stylesheet"
+      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap"
+    />
     <link rel="stylesheet" href="/demo/style.css" />
     <style>
       .bench-shell {
@@ -52,8 +64,7 @@
         justify-content: space-between;
         padding: 12px 16px;
         border-radius: 10px;
-        background: linear-gradient(90deg, rgba(56, 189, 248, 0.14), rgba(167, 139, 250, 0.08));
-        border: 1px solid rgba(56, 189, 248, 0.35);
+        border: 1px solid var(--border);
       }
       .section-banner h2 {
         font-size: 16px;
@@ -81,8 +92,7 @@
         gap: 6px;
       }
       .lib-card.highlight {
-        border-color: rgba(56, 189, 248, 0.55);
-        background: linear-gradient(180deg, rgba(56, 189, 248, 0.08), rgba(17, 23, 35, 0.95));
+        border-color: var(--fg);
       }
       .lib-card-header {
         display: flex;
@@ -117,6 +127,7 @@
         font-size: 12px;
       }
       .bench-grid-section {
+        overflow-x: auto;
         background: var(--bg-panel);
         border: 1px solid var(--border);
         border-radius: 10px;
@@ -162,9 +173,8 @@
         font-family: var(--font-mono);
         font-size: 11px;
         font-weight: 600;
-        background: rgba(52, 211, 153, 0.15);
-        color: #34d399;
-        border: 1px solid rgba(52, 211, 153, 0.35);
+        color: var(--ok);
+        border: 1px solid currentColor;
       }
       .badge-warn {
         display: inline-block;
@@ -173,9 +183,8 @@
         font-family: var(--font-mono);
         font-size: 11px;
         font-weight: 600;
-        background: rgba(251, 191, 36, 0.15);
-        color: #fbbf24;
-        border: 1px solid rgba(251, 191, 36, 0.35);
+        color: var(--warn);
+        border: 1px solid currentColor;
       }
       .badge-fail {
         display: inline-block;
@@ -184,9 +193,8 @@
         font-family: var(--font-mono);
         font-size: 11px;
         font-weight: 600;
-        background: rgba(248, 113, 113, 0.15);
-        color: #f87171;
-        border: 1px solid rgba(248, 113, 113, 0.35);
+        color: var(--bad);
+        border: 1px solid currentColor;
       }
       .bar-cell {
         min-width: 160px;
@@ -204,7 +212,7 @@
         transition: width 0.25s ease;
       }
       .workload-header-row td {
-        background: rgba(24, 33, 50, 0.85);
+        background: var(--bg-elevated);
         font-weight: 600;
         color: var(--accent);
         padding-top: 12px;
@@ -214,25 +222,23 @@
   </head>
   <body style="overflow: auto;">
     <div class="bench-shell">
-      <header class="topbar">
-        <div class="brand">
-          <div class="brand-badge">BENCH 2D</div>
-          <div>
-            <h1>2D Polygon Clipping &amp; Healing Benchmark Suite</h1>
-            <p class="subtitle">
-              Comparing <code>polystrata</code> vs. <code>manifold-3d (CrossSection)</code>,
-              <code>clipper2-js</code>, <code>polygon-clipping</code>, <code>martinez</code>, and <code>@velipso/polybool</code>
-            </p>
-          </div>
-        </div>
-
-        <div class="mode-tabs">
-          <a href="/" class="mode-tab" style="text-decoration: none; display: inline-flex; align-items: center;">
-            &larr; Interactive 2D Kernel Lab
-          </a>
-          <span class="mode-tab active">2D Benchmark Suite</span>
-          <a href="https://github.com/pboyer/polystrata" target="_blank" rel="noopener noreferrer" class="mode-tab" style="text-decoration: none; display: inline-flex; align-items: center;">
-            GitHub &#8599;
+      <header class="header">
+        <a class="wordmark" href="/">polystrata <span>2D</span></a>
+        <nav class="tabs">
+          <a href="/" class="tab">Lab</a>
+          <span class="tab active">Benchmark</span>
+        </nav>
+        <div class="header-actions">
+          <button id="btn-theme" class="icon-btn" aria-label="Toggle theme"></button>
+          <a
+            href="https://github.com/pboyer/polystrata"
+            target="_blank"
+            rel="noopener noreferrer"
+            class="icon-btn"
+            aria-label="GitHub repository"
+            title="GitHub"
+          >
+            <i data-lucide="github"></i>
           </a>
         </div>
       </header>
@@ -240,8 +246,8 @@
       <main class="bench-main">
         <div class="bench-toolbar">
           <div class="bench-toolbar-left">
-            <button id="btn-run-all" class="action-btn primary">Run Full 2D Benchmark Suite</button>
-            <button id="btn-run-quick" class="action-btn">Quick Run (25ms / workload)</button>
+            <button id="btn-run-all" class="btn btn-primary">Run Full 2D Benchmark Suite</button>
+            <button id="btn-run-quick" class="btn">Quick Run (25ms / workload)</button>
             <span id="bench-status" class="bench-status">Initializing WASM engines...</span>
           </div>
           <div style="font-size: 12px; color: var(--text-secondary);">

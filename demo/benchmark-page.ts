@@ -5,14 +5,15 @@ import {
   runFullBenchmarkSuite,
 } from "../bench/runner.js";
 import { initPolystrataWasm } from "../src/index.js";
+import { initTheme } from "./theme.js";
 
 const LIB_COLORS: Record<string, string> = {
-  polystrata: "#38bdf8",
-  "manifold-2d": "#f472b6",
-  "clipper2-js": "#a78bfa",
-  "polygon-clipping": "#34d399",
-  martinez: "#fbbf24",
-  polybool: "#fb7185",
+  polystrata: "#3f6f9f",
+  "manifold-2d": "#b4607a",
+  "clipper2-js": "#8b5a8f",
+  "polygon-clipping": "#6f8a3c",
+  martinez: "#c39130",
+  polybool: "#c0643a",
 };
 
 const statusEl = document.getElementById("bench-status")!;
@@ -39,7 +40,7 @@ function renderReport2D(report: FullBenchmarkReport): void {
     card.className = `lib-card ${lib.id === "polystrata" ? "highlight" : ""}`;
     card.innerHTML = `
       <div class="lib-card-header">
-        <span class="lib-card-name" style="color: ${LIB_COLORS[lib.id] ?? "#f1f5f9"}">${lib.name}</span>
+        <span class="lib-card-name" style="color: ${LIB_COLORS[lib.id] ?? "inherit"}">${lib.name}</span>
         <span class="lib-card-ver">v${lib.version}</span>
       </div>
       <div class="lib-card-algo">${lib.algorithm}</div>
@@ -90,7 +91,7 @@ function renderReport2D(report: FullBenchmarkReport): void {
 
     for (const r of summary.results) {
       const pct = Math.max(2, Math.min(100, (r.opsPerSec / maxOps) * 100));
-      const color = LIB_COLORS[r.libraryId] ?? "#38bdf8";
+      const color = LIB_COLORS[r.libraryId] ?? "#3f6f9f";
       const statusBadge = r.succeeded
         ? `<span class="badge-pass">PASS</span>`
         : r.errorMessage
@@ -149,4 +150,5 @@ async function initPage(): Promise<void> {
   }
 }
 
+initTheme();
 initPage();
