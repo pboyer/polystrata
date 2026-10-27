@@ -1,5 +1,13 @@
 use crate::grid::SpatialHashGrid;
 
+/// A vertex bucketed into the vertex-on-edge grid, stored with its coordinates for locality.
+#[derive(Clone, Copy, Default)]
+pub struct GridVertex {
+    pub x: f64,
+    pub y: f64,
+    pub id: u32,
+}
+
 pub struct KernelArena {
     // Stage 0 input buffers (packed 5 f64s per segment: x0, y0, x1, y1, bodyIndex)
     pub raw_segments: Vec<f64>,
@@ -35,9 +43,10 @@ pub struct KernelArena {
     pub in_zero_v_queue: Vec<u8>,
     pub in_step_v_queue: Vec<u8>,
     pub vert_step_stamp: Vec<u32>,
-    pub sorted_verts: Vec<u32>,
-    pub sv_x: Vec<f64>,
-    pub sv_y: Vec<f64>,
+    pub grid_verts: Vec<GridVertex>,
+    /// Per-cell offsets into `grid_verts` for the vertex-on-edge grid (`cells + 1` entries).
+    pub vgrid_start: Vec<u32>,
+    pub vgrid_scatter: Vec<u32>,
 
     // Incidence pool
     pub inc_count: usize,
@@ -67,6 +76,8 @@ pub struct KernelArena {
     pub se_x1: Vec<f64>,
     pub se_y1: Vec<f64>,
     pub edge_crossing_stamp: Vec<u32>,
+    /// 1 while an edge is an unmoved piece of an edge split at its crossings (see `apply_edge_splits`).
+    pub e_crossing_piece: Vec<u8>,
     pub crossing_stamp_gen: u32,
 
     // Edge split pools
@@ -116,6 +127,9 @@ pub struct KernelArena {
     pub active_edge_ids: Vec<u32>,
     pub active_spokes: Vec<u32>,
     pub walk_vertex_ids: Vec<u32>,
+    /// Number of output boundary half-edges leaving each vertex (2 for a plain boundary vertex,
+    /// more at pinch points where loops touch), valid for vertices on the current output.
+    pub v_out_degree: Vec<u32>,
     pub pinch_stack: Vec<u32>,
     pub simple_loops_csr: Vec<u32>,
     pub simple_loop_starts: Vec<u32>,
@@ -165,9 +179,9 @@ impl KernelArena {
             in_zero_v_queue: Vec::with_capacity(2048),
             in_step_v_queue: Vec::with_capacity(2048),
             vert_step_stamp: Vec::with_capacity(2048),
-            sorted_verts: Vec::with_capacity(2048),
-            sv_x: Vec::with_capacity(2048),
-            sv_y: Vec::with_capacity(2048),
+            grid_verts: Vec::with_capacity(2048),
+            vgrid_start: Vec::with_capacity(4096),
+            vgrid_scatter: Vec::with_capacity(2048),
 
             inc_count: 0,
             inc_edge: Vec::with_capacity(4096),
@@ -195,6 +209,7 @@ impl KernelArena {
             se_x1: Vec::with_capacity(2048),
             se_y1: Vec::with_capacity(2048),
             edge_crossing_stamp: Vec::with_capacity(2048),
+            e_crossing_piece: Vec::with_capacity(2048),
             crossing_stamp_gen: 1,
 
             edge_split_head: Vec::with_capacity(2048),
@@ -240,6 +255,7 @@ impl KernelArena {
             active_edge_ids: Vec::with_capacity(2048),
             active_spokes: Vec::with_capacity(64),
             walk_vertex_ids: Vec::with_capacity(1024),
+            v_out_degree: vec![0; 2048],
             pinch_stack: Vec::with_capacity(1024),
             simple_loops_csr: Vec::with_capacity(1024),
             simple_loop_starts: Vec::with_capacity(128),
@@ -271,13 +287,11 @@ impl KernelArena {
         self.in_zero_v_queue.resize(cap, 0);
         self.in_step_v_queue.resize(cap, 0);
         self.vert_step_stamp.resize(cap, 0);
-        self.sorted_verts.resize(cap, 0);
-        self.sv_x.resize(cap, 0.0);
-        self.sv_y.resize(cap, 0.0);
         self.v_spoke_offset.resize(cap, 0);
         self.v_spoke_count.resize(cap, 0);
         self.v_spoke_cursor.resize(cap, 0);
         self.index_in_stack.resize(cap, -1);
+        self.v_out_degree.resize(cap, 0);
     }
 
     #[inline]
@@ -307,6 +321,7 @@ impl KernelArena {
             self.se_x1.resize(cap, 0.0);
             self.se_y1.resize(cap, 0.0);
             self.edge_crossing_stamp.resize(cap, 0);
+            self.e_crossing_piece.resize(cap, 0);
             self.edge_split_head.resize(cap, -1);
         }
         let needed_dw = self.ev0.len() * body_count;

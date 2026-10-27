@@ -495,81 +495,100 @@ fn eval_predicate(windings: &[f64], body_count: usize, op_code: u32, rule_code: 
     }
 }
 
+/// Remove degenerate (short, spiked) and, optionally, near-collinear vertices from one output loop,
+/// compacting `v_ids` to the survivors in their original order. `keep` is caller-owned scratch.
+///
+/// Only vertices of output degree 2 are removed: dissolving a pinch vertex shared with another
+/// loop would pull this loop off the shared point and let it cross the other loop's edges. A
+/// collinear merge also requires every vertex already removed between the two neighbours to lie
+/// within tolerance of the new edge, so chains of removals cannot drift the boundary.
 fn clean_loop_in_place(
     v_ids: &mut Vec<u32>,
+    keep: &mut Vec<bool>,
     vx: &[f64],
     vy: &[f64],
+    out_degree: &[u32],
     r0: f64,
     simplify_collinear: bool,
 ) -> Option<f64> {
-    if v_ids.len() < 3 {
+    let n = v_ids.len();
+    if n < 3 {
         return None;
     }
     let collinear_tol = r0.max(1e-11);
     let collinear_tol_sq = collinear_tol * collinear_tol;
     let r0_sq = r0 * r0;
+    let step = |i: usize, forward: bool| if forward { (i + 1) % n } else { (i + n - 1) % n };
 
+    keep.clear();
+    keep.resize(n, true);
+    let mut kept = n;
     let mut changed = true;
-    while changed && v_ids.len() >= 3 {
+    while changed && kept >= 3 {
         changed = false;
-        let mut write_idx = 0usize;
-        let n = v_ids.len();
         for i in 0..n {
-            let prev_v = if write_idx > 0 {
-                v_ids[write_idx - 1] as usize
-            } else {
-                v_ids[(i + n - 1) % n] as usize
-            };
-            let curr_v = v_ids[i] as usize;
-            let next_v = v_ids[(i + 1) % n] as usize;
+            if !keep[i] || out_degree[v_ids[i] as usize] != 2 {
+                continue;
+            }
+            let mut pi = step(i, false);
+            while !keep[pi] {
+                pi = step(pi, false);
+            }
+            let mut ri = step(i, true);
+            while !keep[ri] {
+                ri = step(ri, true);
+            }
+            let (p, q, r) = (v_ids[pi] as usize, v_ids[i] as usize, v_ids[ri] as usize);
 
-            let px = vx[prev_v];
-            let py = vy[prev_v];
-            let qx = vx[curr_v];
-            let qy = vy[curr_v];
-            let rx = vx[next_v];
-            let ry = vy[next_v];
-
-            let ux = qx - px;
-            let uy = qy - py;
-            let vx0 = rx - qx;
-            let vy0 = ry - qy;
+            let ux = vx[q] - vx[p];
+            let uy = vy[q] - vy[p];
+            let vx0 = vx[r] - vx[q];
+            let vy0 = vy[r] - vy[q];
+            let wx = vx[r] - vx[p];
+            let wy = vy[r] - vy[p];
             let len_u_sq = ux * ux + uy * uy;
             let len_v_sq = vx0 * vx0 + vy0 * vy0;
-
-            if len_u_sq <= r0_sq || len_v_sq <= r0_sq {
-                changed = true;
-                continue;
-            }
-
-            let wx = rx - px;
-            let wy = ry - py;
             let len_w_sq = wx * wx + wy * wy;
-            if len_w_sq <= r0_sq {
-                changed = true;
-                continue;
-            }
-
             let cross = ux * vy0 - uy * vx0;
             let cross_sq = cross * cross;
             let dot = ux * vx0 + uy * vy0;
-            let min_uv_sq = len_u_sq.min(len_v_sq);
 
-            if dot < 0.0 && cross_sq <= collinear_tol_sq * min_uv_sq {
+            let remove = if len_u_sq <= r0_sq || len_v_sq <= r0_sq || len_w_sq <= r0_sq {
+                true
+            } else if dot < 0.0 {
+                cross_sq <= collinear_tol_sq * len_u_sq.min(len_v_sq)
+            } else {
+                simplify_collinear && dot > 0.0 && cross_sq <= collinear_tol_sq * len_w_sq && {
+                    let mut k = step(pi, true);
+                    let mut within = true;
+                    while within && k != ri {
+                        let m = v_ids[k] as usize;
+                        let c = (vx[m] - vx[p]) * wy - (vy[m] - vy[p]) * wx;
+                        within = c * c <= collinear_tol_sq * len_w_sq;
+                        k = step(k, true);
+                    }
+                    within
+                }
+            };
+            if remove {
+                keep[i] = false;
+                kept -= 1;
                 changed = true;
-                continue;
+                if kept < 3 {
+                    break;
+                }
             }
+        }
+    }
 
-            if simplify_collinear && dot > 0.0 && cross_sq <= collinear_tol_sq * len_w_sq {
-                changed = true;
-                continue;
-            }
-
-            v_ids[write_idx] = curr_v as u32;
+    let mut write_idx = 0usize;
+    for i in 0..n {
+        if keep[i] {
+            v_ids[write_idx] = v_ids[i];
             write_idx += 1;
         }
-        v_ids.truncate(write_idx);
     }
+    v_ids.truncate(write_idx);
 
     let m = v_ids.len();
     if m < 3 {
@@ -972,6 +991,7 @@ pub fn extract_from_cycle_keep(arena: &mut KernelArena, simplify_collinear: bool
         }
 
         let m = arena.active_spokes.len();
+        arena.v_out_degree[v_id] = m as u32;
         if m == 0 {
             continue;
         }
@@ -994,6 +1014,7 @@ pub fn extract_from_cycle_keep(arena: &mut KernelArena, simplify_collinear: bool
     // 4. Trace closed boundary loops and decompose pinch vertices
     arena.he_visited[..half_edge_count].fill(0);
     let mut sub_loop_scratch = Vec::with_capacity(128);
+    let mut keep_scratch = Vec::with_capacity(128);
     let mut total_signed_area = 0.0f64;
 
     for he_id in 0..half_edge_count {
@@ -1071,8 +1092,10 @@ pub fn extract_from_cycle_keep(arena: &mut KernelArena, simplify_collinear: bool
 
             if let Some(area) = clean_loop_in_place(
                 &mut sub_loop_scratch,
+                &mut keep_scratch,
                 &arena.vx,
                 &arena.vy,
+                &arena.v_out_degree,
                 r0,
                 simplify_collinear,
             ) {

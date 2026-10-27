@@ -318,10 +318,10 @@ describe("adversarial robustness (exact-predicate oracle)", () => {
     expect(res.errors).toEqual([]);
   });
 
-  // Known issue: when many near-coincident vertices merge, a snapped vertex can be displaced past a
-  // neighboring edge by more than r_max, leaving exact crossings ~1e-7 deep in the output. Remove
-  // `.fails` once consolidation guarantees a crossing-free arrangement.
-  it.fails("jittered fans produce crossing-free output (known issue)", () => {
+  // Regression: the fixed-point loop used to stop before re-checking intersection vertices and
+  // merged edges against vertex-on-edge snapping, and collinear simplification dissolved pinch
+  // vertices; both left exact crossings ~1e-7 deep in fan outputs.
+  it("jittered fans produce crossing-free output", () => {
     const rng = new Prng(0x5eed000b);
     const res = newResult();
     for (let i = 0; i < 40; i++) {
