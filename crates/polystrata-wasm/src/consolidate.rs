@@ -865,17 +865,18 @@ fn build_sorted_active_verts_in_box(
     count
 }
 
+/// Bounding-box diagonal above which Stage 0 rescales coordinates by an exact power of two.
+const LARGE_INPUT_DIAGONAL: f64 = 3.402823669209385e38; // 2^128
+
 /// Normalize raw segments in `arena.raw_segments[0..seg_count*5]` and store into `prep_*` buffers.
+///
+/// Segments with a non-finite (`NaN` / `±Infinity`) coordinate are dropped, and the bounding box,
+/// center, and diagonal are computed without intermediate overflow so that coordinates near
+/// `f64::MAX` still yield finite tolerances and grid cell sizes.
 pub fn prepare_normalized_segments(arena: &mut KernelArena, seg_count: usize, user_snap_tol: f64) {
-    arena.prep_count = seg_count;
+    arena.prep_count = 0;
     if seg_count == 0 {
-        arena.prep_cx = 0.0;
-        arena.prep_cy = 0.0;
-        arena.prep_diagonal = 0.0;
-        arena.prep_r0 = 1e-9;
-        arena.prep_rmax = 2e-9;
-        arena.prep_cell_size = 1.0;
-        arena.prep_body_count = 2;
+        set_empty_preparation(arena, 2);
         return;
     }
 
@@ -892,6 +893,7 @@ pub fn prepare_normalized_segments(arena: &mut KernelArena, seg_count: usize, us
     let mut max_x = f64::NEG_INFINITY;
     let mut max_y = f64::NEG_INFINITY;
     let mut max_body = 0usize;
+    let mut kept = 0usize;
 
     for i in 0..seg_count {
         let base = i * 5;
@@ -899,47 +901,93 @@ pub fn prepare_normalized_segments(arena: &mut KernelArena, seg_count: usize, us
         let y0 = arena.raw_segments[base + 1];
         let x1 = arena.raw_segments[base + 2];
         let y1 = arena.raw_segments[base + 3];
+        // Body count includes bodies whose segments are all dropped, so N-ary predicates still see them.
         let b = arena.raw_segments[base + 4] as usize;
         if b > max_body {
             max_body = b;
+        }
+        if !(x0.is_finite() && y0.is_finite() && x1.is_finite() && y1.is_finite()) {
+            continue;
         }
         min_x = min_x.min(x0).min(x1);
         min_y = min_y.min(y0).min(y1);
         max_x = max_x.max(x0).max(x1);
         max_y = max_y.max(y0).max(y1);
+        arena.prep_x0[kept] = x0;
+        arena.prep_y0[kept] = y0;
+        arena.prep_x1[kept] = x1;
+        arena.prep_y1[kept] = y1;
+        arena.prep_body[kept] = b as u32;
+        kept += 1;
     }
 
-    let cx = 0.5 * (min_x + max_x);
-    let cy = 0.5 * (min_y + max_y);
-    let diagonal = ((max_x - min_x) * (max_x - min_x) + (max_y - min_y) * (max_y - min_y)).sqrt();
-    let scale = diagonal.max(1.0);
+    let body_count = (max_body + 1).max(2);
+    if kept == 0 {
+        set_empty_preparation(arena, body_count);
+        return;
+    }
+
+    // Halve before combining so neither the center nor the half-extents can overflow.
+    let cx = 0.5 * min_x + 0.5 * max_x;
+    let cy = 0.5 * min_y + 0.5 * max_y;
+    let half_w = 0.5 * max_x - 0.5 * min_x;
+    let half_h = 0.5 * max_y - 0.5 * min_y;
+    let diagonal = (2.0 * half_w.hypot(half_h)).min(f64::MAX);
+
+    // Products of squared lengths overflow once extents pass ~1e77, so astronomically large inputs
+    // are mapped by an exact power of two to a unit-sized diagonal. Every tolerance below is
+    // relative to the diagonal in that regime, so results are scale-equivariant; ordinary inputs
+    // (diagonal <= 2^128) keep a scale of exactly 1.0 and are unaffected.
+    let (scale_factor, inv_scale) = if diagonal > LARGE_INPUT_DIAGONAL {
+        // Exact binary exponent (diagonal is normal here); `log2` rounds f64::MAX up to 1024.
+        let k = ((diagonal.to_bits() >> 52) & 0x7ff) as i32 - 1023;
+        (2f64.powi(-k), 2f64.powi(k))
+    } else {
+        (1.0, 1.0)
+    };
+    let scaled_diagonal = diagonal * scale_factor;
+    let scale = scaled_diagonal.max(1.0);
     let numerical_floor = 1e-9 * scale;
 
-    let (r0, r_max) = if user_snap_tol >= 0.0 {
-        let r = user_snap_tol.max(numerical_floor);
+    let (r0, r_max) = if user_snap_tol >= 0.0 && user_snap_tol.is_finite() {
+        let r = (user_snap_tol * scale_factor).max(numerical_floor);
         (r, r * 2.0)
     } else {
         (numerical_floor, numerical_floor * 4.0)
     };
 
-    for i in 0..seg_count {
-        let base = i * 5;
-        arena.prep_x0[i] = arena.raw_segments[base] - cx;
-        arena.prep_y0[i] = arena.raw_segments[base + 1] - cy;
-        arena.prep_x1[i] = arena.raw_segments[base + 2] - cx;
-        arena.prep_y1[i] = arena.raw_segments[base + 3] - cy;
-        arena.prep_body[i] = arena.raw_segments[base + 4] as u32;
+    // Scale before subtracting so the shift cannot overflow; both steps are exact for powers of two.
+    let (scx, scy) = (cx * scale_factor, cy * scale_factor);
+    for i in 0..kept {
+        arena.prep_x0[i] = arena.prep_x0[i] * scale_factor - scx;
+        arena.prep_y0[i] = arena.prep_y0[i] * scale_factor - scy;
+        arena.prep_x1[i] = arena.prep_x1[i] * scale_factor - scx;
+        arena.prep_y1[i] = arena.prep_y1[i] * scale_factor - scy;
     }
 
     let cell_size = (r0 * 16.0).max(r_max * 8.0).max(1e-6 * scale);
 
+    arena.prep_count = kept;
     arena.prep_cx = cx;
     arena.prep_cy = cy;
+    arena.prep_inv_scale = inv_scale;
     arena.prep_diagonal = diagonal;
     arena.prep_r0 = r0;
     arena.prep_rmax = r_max;
     arena.prep_cell_size = cell_size;
-    arena.prep_body_count = (max_body + 1).max(2);
+    arena.prep_body_count = body_count;
+}
+
+fn set_empty_preparation(arena: &mut KernelArena, body_count: usize) {
+    arena.prep_count = 0;
+    arena.prep_cx = 0.0;
+    arena.prep_cy = 0.0;
+    arena.prep_diagonal = 0.0;
+    arena.prep_r0 = 1e-9;
+    arena.prep_rmax = 2e-9;
+    arena.prep_cell_size = 1.0;
+    arena.prep_inv_scale = 1.0;
+    arena.prep_body_count = body_count;
 }
 
 /// Stage 1 & 2: Consolidate the prepared normalized segments into a 2D Stratified Tolerance Complex.

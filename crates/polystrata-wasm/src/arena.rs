@@ -18,6 +18,9 @@ pub struct KernelArena {
     pub prep_r0: f64,
     pub prep_rmax: f64,
     pub prep_cell_size: f64,
+    /// Exact power-of-two factor mapping normalized coordinates back to world units
+    /// (`world = normalized * prep_inv_scale + center`); `1.0` unless the input is astronomically large.
+    pub prep_inv_scale: f64,
     pub prep_body_count: usize,
 
     // Stage 1-2: Vertices (SoA)
@@ -148,6 +151,7 @@ impl KernelArena {
             prep_r0: 1e-9,
             prep_rmax: 4e-9,
             prep_cell_size: 1.0,
+            prep_inv_scale: 1.0,
             prep_body_count: 1,
 
             vertex_count: 0,

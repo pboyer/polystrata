@@ -771,6 +771,7 @@ pub fn compute_cycles_and_windings(arena: &mut KernelArena, capture_samples: boo
     let body_count = arena.prep_body_count;
     let cx = arena.prep_cx;
     let cy = arena.prep_cy;
+    let inv_scale = arena.prep_inv_scale;
 
     if edge_count == 0 || cycle_count == 0 {
         return;
@@ -836,8 +837,8 @@ pub fn compute_cycles_and_windings(arena: &mut KernelArena, capture_samples: boo
 
             let (sx, sy) = pick_cycle_sample_point(start_cid, arena, edges_sorted);
             if capture_samples {
-                arena.cycle_sample_x[start_cid] = sx + cx;
-                arena.cycle_sample_y[start_cid] = sy + cy;
+                arena.cycle_sample_x[start_cid] = sx * inv_scale + cx;
+                arena.cycle_sample_y[start_cid] = sy * inv_scale + cy;
             }
             evaluate_winding_numbers(sx, sy, arena, &mut w_scratch, edges_sorted);
 
@@ -874,8 +875,8 @@ pub fn compute_cycles_and_windings(arena: &mut KernelArena, capture_samples: boo
                     arena.cycle_visited[next_cid] = 1;
                     if capture_samples {
                         let (nsx, nsy) = pick_cycle_sample_point(next_cid, arena, edges_sorted);
-                        arena.cycle_sample_x[next_cid] = nsx + cx;
-                        arena.cycle_sample_y[next_cid] = nsy + cy;
+                        arena.cycle_sample_x[next_cid] = nsx * inv_scale + cx;
+                        arena.cycle_sample_y[next_cid] = nsy * inv_scale + cy;
                     }
                     let e_base = ((he_id >> 1) as usize) * body_count;
                     let step_sign: i32 = if (he_id & 1) == 0 { -1 } else { 1 };
@@ -904,8 +905,8 @@ pub fn compute_cycles_and_windings(arena: &mut KernelArena, capture_samples: boo
         for c_id in 0..cycle_count {
             let (sx, sy) = pick_cycle_sample_point(c_id, arena, edges_sorted);
             if capture_samples {
-                arena.cycle_sample_x[c_id] = sx + cx;
-                arena.cycle_sample_y[c_id] = sy + cy;
+                arena.cycle_sample_x[c_id] = sx * inv_scale + cx;
+                arena.cycle_sample_y[c_id] = sy * inv_scale + cy;
             }
             evaluate_winding_numbers_subtended_angle(sx, sy, arena, &mut w_scratch);
             let base = c_id * body_count;
@@ -931,6 +932,7 @@ pub fn extract_from_cycle_keep(arena: &mut KernelArena, simplify_collinear: bool
     let r0 = arena.prep_r0;
     let cx = arena.prep_cx;
     let cy = arena.prep_cy;
+    let inv_scale = arena.prep_inv_scale;
 
     if edge_count == 0 || cycle_count == 0 || arena.active_edge_ids.is_empty() {
         return;
@@ -1081,8 +1083,8 @@ pub fn extract_from_cycle_keep(arena: &mut KernelArena, simplify_collinear: bool
 
                 for &v in &sub_loop_scratch {
                     let vu = v as usize;
-                    arena.out_coords.push(arena.vx[vu] + cx);
-                    arena.out_coords.push(arena.vy[vu] + cy);
+                    arena.out_coords.push(arena.vx[vu] * inv_scale + cx);
+                    arena.out_coords.push(arena.vy[vu] * inv_scale + cy);
                 }
 
                 arena.out_loop_meta.push(pt_start);
@@ -1093,5 +1095,5 @@ pub fn extract_from_cycle_keep(arena: &mut KernelArena, simplify_collinear: bool
         }
     }
 
-    arena.out_total_area = total_signed_area;
+    arena.out_total_area = total_signed_area * inv_scale * inv_scale;
 }

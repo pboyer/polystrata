@@ -213,6 +213,34 @@ impl SpatialHashGrid {
         }
         self.current_stamp = stamp;
 
+        // Huge or saturated cell ranges (e.g. a query radius far larger than the cell size, or
+        // coordinates beyond i32 cell indices) would take ~2^64 iterations to walk cell by cell.
+        // Scanning the occupied slots instead bounds the query at O(table_cap).
+        let span_x = (ix1 as i64 - ix0 as i64 + 1).max(0);
+        let span_y = (iy1 as i64 - iy0 as i64 + 1).max(0);
+        if span_x.saturating_mul(span_y) > self.table_cap as i64 {
+            for slot in 0..self.table_cap {
+                if self.slot_stamp[slot] != gen {
+                    continue;
+                }
+                let (ix, iy) = (self.slot_ix[slot], self.slot_iy[slot]);
+                if ix < ix0 || ix > ix1 || iy < iy0 || iy > iy1 {
+                    continue;
+                }
+                let mut n = self.slot_head[slot];
+                while n != -1 {
+                    let nu = n as usize;
+                    let id = self.node_item[nu];
+                    if self.seen_stamp[id as usize] != stamp {
+                        self.seen_stamp[id as usize] = stamp;
+                        out.push(id);
+                    }
+                    n = self.node_next[nu];
+                }
+            }
+            return;
+        }
+
         for ix in ix0..=ix1 {
             let hx = ix.wrapping_mul(73856093);
             for iy in iy0..=iy1 {
