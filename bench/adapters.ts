@@ -151,26 +151,22 @@ function polyBoolPolygonArea(poly: PolyBoolPolygon): number {
   return total;
 }
 
+const OP_CODES: Record<BenchOp, 0 | 1 | 2 | 3> = { union: 0, intersect: 1, difference: 2, xor: 3 };
+
 export const LIBRARY_ADAPTERS: LibraryAdapter[] = [
   {
     id: "polystrata",
     name: "polystrata",
-    version: "0.1.1",
+    version: "0.1.2",
     algorithm: "4-Stage Snapped B-Rep + 1D Sweep + Rust/WASM SIMD",
     prepare: (subject, clip) => {
       const wasmTask = prepareBooleanTask(subject, clip);
       return {
         run: (op) => {
-          switch (op) {
-            case "union":
-              return wasmTask.run(0);
-            case "intersect":
-              return wasmTask.run(1);
-            case "difference":
-              return wasmTask.run(2);
-            case "xor":
-              return wasmTask.run(3);
-          }
+          const result = wasmTask.run(OP_CODES[op]);
+          // Materialize JS loops so timings include output, as for every other library.
+          result.toLoops();
+          return result;
         },
         computeArea: (res) => (res as WasmPathsResult).totalArea,
       };
@@ -284,7 +280,7 @@ export const LIBRARY_ADAPTERS: LibraryAdapter[] = [
   {
     id: "martinez",
     name: "martinez-polygon-clipping",
-    version: "0.9.0",
+    version: "0.7.3",
     algorithm: "Martínez-Rueda Sweep-Line + TinyQueue + SplayTree",
     prepare: (subject, clip) => {
       const subGeo = toGeoJSONMultiPolygon(subject);
