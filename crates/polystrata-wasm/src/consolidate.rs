@@ -1,4 +1,4 @@
-use crate::arena::KernelArena;
+use crate::arena::{GridVertex, KernelArena};
 
 #[inline]
 pub fn resolve_canonical_vertex(parents: &mut [u32], v: u32) -> u32 {
@@ -140,6 +140,7 @@ fn mark_step_vertex_dirty(arena: &mut KernelArena, v_id: u32) {
 #[inline]
 fn mark_edge_dirty(arena: &mut KernelArena, e_id: u32) {
     let eu = e_id as usize;
+    arena.e_crossing_piece[eu] = 0;
     if arena.in_zero_e_queue[eu] == 0 {
         arena.in_zero_e_queue[eu] = 1;
         arena.zero_e_queue.push(e_id);
@@ -348,9 +349,7 @@ fn find_or_create_vertex(
     arena.in_step_v_queue[id] = 0;
 
     arena.vertex_grid.insert_point(x, y, id_u32);
-    if allow_weighted_move {
-        mark_step_vertex_dirty(arena, id_u32);
-    }
+    mark_step_vertex_dirty(arena, id_u32);
     id_u32
 }
 
@@ -620,7 +619,10 @@ fn record_split(arena: &mut KernelArena, edge_id: u32, t: f64, vertex_id: u32) {
     arena.edge_split_head[eu] = s_idx as i32;
 }
 
-fn apply_edge_splits(arena: &mut KernelArena, body_count: usize, mark_step_dirty: bool) -> bool {
+/// Replace every edge with pending splits by its chain of sub-edges, all queued for the next step.
+/// `crossing_pieces` marks the sub-edges as pieces of an edge already crossing-checked this step:
+/// they still need the vertex-on-edge check but not another crossing pass.
+fn apply_edge_splits(arena: &mut KernelArena, body_count: usize, crossing_pieces: bool) -> bool {
     let num_split_edges = arena.split_edge_list.len();
     if num_split_edges == 0 {
         return false;
@@ -698,15 +700,6 @@ fn apply_edge_splits(arena: &mut KernelArena, body_count: usize, mark_step_dirty
             if new_id >= arena.ev0.len() || (new_id + 1) * body_count > arena.e_delta_w.len() {
                 arena.ensure_edge_capacity(new_id + 1, body_count);
             }
-            let need_zero = if !mark_step_dirty {
-                if arena.v_first_inc[u as usize] != -1 && arena.v_first_inc[v as usize] != -1 {
-                    has_coincident_incident_edge(arena, u, v)
-                } else {
-                    false
-                }
-            } else {
-                true
-            };
             arena.edge_count = new_id + 1;
             arena.ev0[new_id] = u;
             arena.ev1[new_id] = v;
@@ -733,24 +726,8 @@ fn apply_edge_splits(arena: &mut KernelArena, body_count: usize, mark_step_dirty
             let new_id_u32 = new_id as u32;
             link_incident_edge(arena, u, new_id_u32);
             link_incident_edge(arena, v, new_id_u32);
-            if mark_step_dirty {
-                mark_edge_dirty(arena, new_id_u32);
-            } else {
-                let dx = x1 - x0;
-                let dy = y1 - y0;
-                let rad_sum = arena.vr[uu] + arena.vr[vu];
-                let is_short = dx * dx + dy * dy <= rad_sum * rad_sum;
-                if need_zero
-                    || is_short
-                    || arena.in_zero_v_queue[uu] != 0
-                    || arena.in_zero_v_queue[vu] != 0
-                {
-                    if arena.in_zero_e_queue[new_id] == 0 {
-                        arena.in_zero_e_queue[new_id] = 1;
-                        arena.zero_e_queue.push(new_id_u32);
-                    }
-                }
-            }
+            mark_edge_dirty(arena, new_id_u32);
+            arena.e_crossing_piece[new_id] = crossing_pieces as u8;
         }
     }
 
@@ -774,16 +751,6 @@ fn populate_sorted_edge_bounds(arena: &mut KernelArena, count: usize) {
             *arena.se_y0.get_unchecked_mut(i) = *arena.vy.get_unchecked(v0 as usize);
             *arena.se_x1.get_unchecked_mut(i) = *arena.vx.get_unchecked(v1 as usize);
             *arena.se_y1.get_unchecked_mut(i) = *arena.vy.get_unchecked(v1 as usize);
-        }
-    }
-}
-
-fn populate_sorted_vert_coords(arena: &mut KernelArena, count: usize) {
-    for i in 0..count {
-        let vu = unsafe { *arena.sorted_verts.get_unchecked(i) } as usize;
-        unsafe {
-            *arena.sv_x.get_unchecked_mut(i) = *arena.vx.get_unchecked(vu);
-            *arena.sv_y.get_unchecked_mut(i) = *arena.vy.get_unchecked(vu);
         }
     }
 }
@@ -827,55 +794,115 @@ fn build_sorted_active_edges_in_box(
     count
 }
 
-fn build_sorted_active_verts(arena: &mut KernelArena) -> usize {
-    let total_verts = arena.vertex_count;
-    let mut count = 0usize;
-    for v_id in 0..total_verts {
-        if arena.v_alive[v_id] != 0 {
-            arena.sorted_verts[count] = v_id as u32;
-            count += 1;
-        }
-    }
-    sort_indices_by_f64(&mut arena.sorted_verts[..count], &arena.vx);
-    populate_sorted_vert_coords(arena, count);
-    count
+/// Dense uniform grid over the active vertices for the vertex-on-edge operator: vertices are
+/// bucketed by cell into `grid_verts`, with `vgrid_start` holding each cell's offset. Each edge
+/// visits only the cells within tolerance of its segment.
+#[derive(Clone, Copy)]
+struct VertexGrid {
+    x0: f64,
+    y0: f64,
+    cell: f64,
+    inv: f64,
+    nx: usize,
+    ny: usize,
 }
 
-fn build_sorted_active_verts_in_box(
-    arena: &mut KernelArena,
-    min_x: f64,
-    max_x: f64,
-    min_y: f64,
-    max_y: f64,
-) -> usize {
-    let total_verts = arena.vertex_count;
-    let mut count = 0usize;
-    for v_id in 0..total_verts {
-        if arena.v_alive[v_id] != 0 {
-            let x = arena.vx[v_id];
-            let y = arena.vy[v_id];
-            if x >= min_x && x <= max_x && y >= min_y && y <= max_y {
-                arena.sorted_verts[count] = v_id as u32;
-                count += 1;
-            }
-        }
+impl VertexGrid {
+    #[inline]
+    fn col(&self, x: f64) -> usize {
+        (((x - self.x0) * self.inv).floor().max(0.0) as usize).min(self.nx - 1)
     }
-    sort_indices_by_f64(&mut arena.sorted_verts[..count], &arena.vx);
-    populate_sorted_vert_coords(arena, count);
-    count
+
+    #[inline]
+    fn row(&self, y: f64) -> usize {
+        (((y - self.y0) * self.inv).floor().max(0.0) as usize).min(self.ny - 1)
+    }
 }
+
+/// Bucket the alive vertices inside `bounds` (all alive vertices when `None`) into the grid.
+/// Returns `None` when there are no such vertices.
+fn build_active_vertex_grid(
+    arena: &mut KernelArena,
+    bounds: Option<(f64, f64, f64, f64)>,
+    min_cell: f64,
+) -> Option<VertexGrid> {
+    let (bx0, bx1, by0, by1) = bounds.unwrap_or((
+        f64::NEG_INFINITY,
+        f64::INFINITY,
+        f64::NEG_INFINITY,
+        f64::INFINITY,
+    ));
+    let mut count = 0usize;
+    arena.vgrid_scatter.clear();
+    let (mut x0, mut x1, mut y0, mut y1) =
+        (f64::INFINITY, f64::NEG_INFINITY, f64::INFINITY, f64::NEG_INFINITY);
+    for v_id in 0..arena.vertex_count {
+        if arena.v_alive[v_id] == 0 {
+            continue;
+        }
+        let x = arena.vx[v_id];
+        let y = arena.vy[v_id];
+        if x < bx0 || x > bx1 || y < by0 || y > by1 {
+            continue;
+        }
+        arena.vgrid_scatter.push(v_id as u32);
+        count += 1;
+        x0 = x0.min(x);
+        x1 = x1.max(x);
+        y0 = y0.min(y);
+        y1 = y1.max(y);
+    }
+    if count == 0 {
+        return None;
+    }
+
+    // About one vertex per cell, so each edge's candidates scale with its length in cells.
+    let (w, h) = (x1 - x0, y1 - y0);
+    let n = count as f64;
+    let cell = (w * h / n).sqrt().max(w.max(h) / n).max(min_cell);
+    let nx = (w / cell) as usize + 1;
+    let ny = (h / cell) as usize + 1;
+    let grid = VertexGrid { x0, y0, cell, inv: 1.0 / cell, nx, ny };
+
+    // Counting sort by cell: `vgrid_start[c]..vgrid_start[c + 1]` indexes cell `c`'s vertices.
+    let cells = nx * ny;
+    arena.vgrid_start.clear();
+    arena.vgrid_start.resize(cells + 1, 0);
+    for i in 0..count {
+        let v = arena.vgrid_scatter[i] as usize;
+        arena.vgrid_start[grid.row(arena.vy[v]) * nx + grid.col(arena.vx[v]) + 1] += 1;
+    }
+    for c in 0..cells {
+        arena.vgrid_start[c + 1] += arena.vgrid_start[c];
+    }
+    arena.grid_verts.clear();
+    arena.grid_verts.resize(count, GridVertex::default());
+    for i in 0..count {
+        let v = arena.vgrid_scatter[i];
+        let (x, y) = (arena.vx[v as usize], arena.vy[v as usize]);
+        let c = grid.row(y) * nx + grid.col(x);
+        arena.grid_verts[arena.vgrid_start[c] as usize] = GridVertex { x, y, id: v };
+        arena.vgrid_start[c] += 1;
+    }
+    for c in (1..=cells).rev() {
+        arena.vgrid_start[c] = arena.vgrid_start[c - 1];
+    }
+    arena.vgrid_start[0] = 0;
+    Some(grid)
+}
+
+/// Bounding-box diagonal above which Stage 0 rescales coordinates by an exact power of two.
+const LARGE_INPUT_DIAGONAL: f64 = 3.402823669209385e38; // 2^128
 
 /// Normalize raw segments in `arena.raw_segments[0..seg_count*5]` and store into `prep_*` buffers.
+///
+/// Segments with a non-finite (`NaN` / `±Infinity`) coordinate are dropped, and the bounding box,
+/// center, and diagonal are computed without intermediate overflow so that coordinates near
+/// `f64::MAX` still yield finite tolerances and grid cell sizes.
 pub fn prepare_normalized_segments(arena: &mut KernelArena, seg_count: usize, user_snap_tol: f64) {
-    arena.prep_count = seg_count;
+    arena.prep_count = 0;
     if seg_count == 0 {
-        arena.prep_cx = 0.0;
-        arena.prep_cy = 0.0;
-        arena.prep_diagonal = 0.0;
-        arena.prep_r0 = 1e-9;
-        arena.prep_rmax = 2e-9;
-        arena.prep_cell_size = 1.0;
-        arena.prep_body_count = 2;
+        set_empty_preparation(arena, 2);
         return;
     }
 
@@ -892,6 +919,7 @@ pub fn prepare_normalized_segments(arena: &mut KernelArena, seg_count: usize, us
     let mut max_x = f64::NEG_INFINITY;
     let mut max_y = f64::NEG_INFINITY;
     let mut max_body = 0usize;
+    let mut kept = 0usize;
 
     for i in 0..seg_count {
         let base = i * 5;
@@ -899,47 +927,93 @@ pub fn prepare_normalized_segments(arena: &mut KernelArena, seg_count: usize, us
         let y0 = arena.raw_segments[base + 1];
         let x1 = arena.raw_segments[base + 2];
         let y1 = arena.raw_segments[base + 3];
+        // Body count includes bodies whose segments are all dropped, so N-ary predicates still see them.
         let b = arena.raw_segments[base + 4] as usize;
         if b > max_body {
             max_body = b;
+        }
+        if !(x0.is_finite() && y0.is_finite() && x1.is_finite() && y1.is_finite()) {
+            continue;
         }
         min_x = min_x.min(x0).min(x1);
         min_y = min_y.min(y0).min(y1);
         max_x = max_x.max(x0).max(x1);
         max_y = max_y.max(y0).max(y1);
+        arena.prep_x0[kept] = x0;
+        arena.prep_y0[kept] = y0;
+        arena.prep_x1[kept] = x1;
+        arena.prep_y1[kept] = y1;
+        arena.prep_body[kept] = b as u32;
+        kept += 1;
     }
 
-    let cx = 0.5 * (min_x + max_x);
-    let cy = 0.5 * (min_y + max_y);
-    let diagonal = ((max_x - min_x) * (max_x - min_x) + (max_y - min_y) * (max_y - min_y)).sqrt();
-    let scale = diagonal.max(1.0);
+    let body_count = (max_body + 1).max(2);
+    if kept == 0 {
+        set_empty_preparation(arena, body_count);
+        return;
+    }
+
+    // Halve before combining so neither the center nor the half-extents can overflow.
+    let cx = 0.5 * min_x + 0.5 * max_x;
+    let cy = 0.5 * min_y + 0.5 * max_y;
+    let half_w = 0.5 * max_x - 0.5 * min_x;
+    let half_h = 0.5 * max_y - 0.5 * min_y;
+    let diagonal = (2.0 * half_w.hypot(half_h)).min(f64::MAX);
+
+    // Products of squared lengths overflow once extents pass ~1e77, so astronomically large inputs
+    // are mapped by an exact power of two to a unit-sized diagonal. Every tolerance below is
+    // relative to the diagonal in that regime, so results are scale-equivariant; ordinary inputs
+    // (diagonal <= 2^128) keep a scale of exactly 1.0 and are unaffected.
+    let (scale_factor, inv_scale) = if diagonal > LARGE_INPUT_DIAGONAL {
+        // Exact binary exponent (diagonal is normal here); `log2` rounds f64::MAX up to 1024.
+        let k = ((diagonal.to_bits() >> 52) & 0x7ff) as i32 - 1023;
+        (2f64.powi(-k), 2f64.powi(k))
+    } else {
+        (1.0, 1.0)
+    };
+    let scaled_diagonal = diagonal * scale_factor;
+    let scale = scaled_diagonal.max(1.0);
     let numerical_floor = 1e-9 * scale;
 
-    let (r0, r_max) = if user_snap_tol >= 0.0 {
-        let r = user_snap_tol.max(numerical_floor);
+    let (r0, r_max) = if user_snap_tol >= 0.0 && user_snap_tol.is_finite() {
+        let r = (user_snap_tol * scale_factor).max(numerical_floor);
         (r, r * 2.0)
     } else {
         (numerical_floor, numerical_floor * 4.0)
     };
 
-    for i in 0..seg_count {
-        let base = i * 5;
-        arena.prep_x0[i] = arena.raw_segments[base] - cx;
-        arena.prep_y0[i] = arena.raw_segments[base + 1] - cy;
-        arena.prep_x1[i] = arena.raw_segments[base + 2] - cx;
-        arena.prep_y1[i] = arena.raw_segments[base + 3] - cy;
-        arena.prep_body[i] = arena.raw_segments[base + 4] as u32;
+    // Scale before subtracting so the shift cannot overflow; both steps are exact for powers of two.
+    let (scx, scy) = (cx * scale_factor, cy * scale_factor);
+    for i in 0..kept {
+        arena.prep_x0[i] = arena.prep_x0[i] * scale_factor - scx;
+        arena.prep_y0[i] = arena.prep_y0[i] * scale_factor - scy;
+        arena.prep_x1[i] = arena.prep_x1[i] * scale_factor - scx;
+        arena.prep_y1[i] = arena.prep_y1[i] * scale_factor - scy;
     }
 
     let cell_size = (r0 * 16.0).max(r_max * 8.0).max(1e-6 * scale);
 
+    arena.prep_count = kept;
     arena.prep_cx = cx;
     arena.prep_cy = cy;
+    arena.prep_inv_scale = inv_scale;
     arena.prep_diagonal = diagonal;
     arena.prep_r0 = r0;
     arena.prep_rmax = r_max;
     arena.prep_cell_size = cell_size;
-    arena.prep_body_count = (max_body + 1).max(2);
+    arena.prep_body_count = body_count;
+}
+
+fn set_empty_preparation(arena: &mut KernelArena, body_count: usize) {
+    arena.prep_count = 0;
+    arena.prep_cx = 0.0;
+    arena.prep_cy = 0.0;
+    arena.prep_diagonal = 0.0;
+    arena.prep_r0 = 1e-9;
+    arena.prep_rmax = 2e-9;
+    arena.prep_cell_size = 1.0;
+    arena.prep_inv_scale = 1.0;
+    arena.prep_body_count = body_count;
 }
 
 /// Stage 1 & 2: Consolidate the prepared normalized segments into a 2D Stratified Tolerance Complex.
@@ -1102,13 +1176,14 @@ pub fn consolidate_prepared(arena: &mut KernelArena) {
             build_sorted_active_edges_in_box(arena, act_min_x, act_max_x, act_min_y, act_max_y)
         };
 
-        // Operator 3a & 3b: Unified Two-Pointer 1D X-Sweep between sorted_edges and sorted_verts
+        // Operator 3a & 3b: vertex-on-edge splitting, each edge visiting nearby grid cells
         if !arena.dirty_verts.is_empty() || (iter > 0 && !arena.dirty_edges.is_empty()) {
-            let active_vert_count = if iter == 0 {
-                build_sorted_active_verts(arena)
+            let bounds = if iter == 0 {
+                None
             } else {
-                build_sorted_active_verts_in_box(arena, act_min_x, act_max_x, act_min_y, act_max_y)
+                Some((act_min_x, act_max_x, act_min_y, act_max_y))
             };
+            let grid = build_active_vertex_grid(arena, bounds, 2.0 * max_tol);
             let has_dirty_verts = !arena.dirty_verts.is_empty();
             let mut dv_min_x = f64::INFINITY;
             let mut dv_max_x = f64::NEG_INFINITY;
@@ -1125,11 +1200,26 @@ pub fn consolidate_prepared(arena: &mut KernelArena) {
                     dv_max_y = dv_max_y.max(y);
                 }
             }
-            let mut v_start = 0usize;
 
-            for i in 0..active_edge_count {
-                let edge_id = arena.sorted_edges[i];
-                let eu = edge_id as usize;
+            // Edges are visited in storage order (the grid makes sweep order irrelevant), which
+            // keeps the per-edge reads sequential.
+            let (bx0, bx1, by0, by1) = bounds.unwrap_or((
+                f64::NEG_INFINITY,
+                f64::INFINITY,
+                f64::NEG_INFINITY,
+                f64::INFINITY,
+            ));
+            for eu in 0..arena.edge_count {
+                let Some(grid) = grid else { break };
+                if arena.e_alive[eu] == 0
+                    || arena.e_max_x[eu] < bx0
+                    || arena.e_min_x[eu] > bx1
+                    || arena.e_max_y[eu] < by0
+                    || arena.e_min_y[eu] > by1
+                {
+                    continue;
+                }
+                let edge_id = eu as u32;
                 let edge_dirty = iter == 0 || arena.edge_crossing_stamp[eu] == step_stamp;
                 if !edge_dirty {
                     if !has_dirty_verts {
@@ -1143,17 +1233,7 @@ pub fn consolidate_prepared(arena: &mut KernelArena) {
                         continue;
                     }
                 }
-                let x_start = arena.se_min_x[i] - max_tol;
 
-                while v_start < active_vert_count
-                    && unsafe { *arena.sv_x.get_unchecked(v_start) } < x_start
-                {
-                    v_start += 1;
-                }
-
-                let x_end = arena.e_max_x[eu] + max_tol;
-                let min_y_pad = arena.se_min_y[i] - max_tol;
-                let max_y_pad = arena.se_max_y[i] + max_tol;
                 let u = arena.ev0[eu];
                 let v = arena.ev1[eu];
                 let ax = arena.vx[u as usize];
@@ -1168,53 +1248,72 @@ pub fn consolidate_prepared(arena: &mut KernelArena) {
                 }
                 let inv_len_sq = 1.0 / len_sq;
                 let max_cross_sq = (max_tol * max_tol) * len_sq;
+                let (e_min_x, e_max_x) = (arena.e_min_x[eu], arena.e_max_x[eu]);
+                let (e_min_y, e_max_y) = (arena.e_min_y[eu], arena.e_max_y[eu]);
+                let x_per_y = if dy == 0.0 { 0.0 } else { dx / dy };
 
-                for k in v_start..active_vert_count {
-                    let px = unsafe { *arena.sv_x.get_unchecked(k) };
-                    if px > x_end {
-                        break;
-                    }
-                    let py = unsafe { *arena.sv_y.get_unchecked(k) };
-                    if py < min_y_pad || py > max_y_pad {
+                // A vertex within `max_tol` of the edge lies in a row whose band (widened by
+                // `max_tol`) meets the edge, and within `max_tol` of that portion's x-range.
+                for row in grid.row(e_min_y - max_tol)..=grid.row(e_max_y + max_tol) {
+                    let band_lo = grid.y0 + row as f64 * grid.cell - max_tol;
+                    let band_hi = band_lo + grid.cell + 2.0 * max_tol;
+                    let y_lo = band_lo.max(e_min_y);
+                    let y_hi = band_hi.min(e_max_y);
+                    if y_lo > y_hi {
                         continue;
                     }
-                    let qx = px - ax;
-                    let qy = py - ay;
-                    let cross = qx * dy - qy * dx;
-                    if cross * cross > max_cross_sq {
-                        continue;
-                    }
-                    let v_id = unsafe { *arena.sorted_verts.get_unchecked(k) };
-                    let vu = v_id as usize;
-                    if !edge_dirty && arena.vert_step_stamp[vu] != step_stamp {
-                        continue;
-                    }
-                    if v_id == u || v_id == v {
-                        continue;
-                    }
-                    let tol = arena.vr[vu] + initial_vertex_radius;
-                    if cross * cross > (tol * tol) * len_sq {
-                        continue;
-                    }
-                    let dot = qx * dx + qy * dy;
-                    if dot <= 0.0 || dot >= len_sq {
-                        continue;
-                    }
-                    let t = dot * inv_len_sq;
-                    if t > 0.0 && t < 1.0 {
-                        record_split(arena, edge_id, t, v_id);
+                    let (x_lo, x_hi) = if dy == 0.0 {
+                        (e_min_x, e_max_x)
+                    } else {
+                        let xa = ax + (y_lo - ay) * x_per_y;
+                        let xb = ax + (y_hi - ay) * x_per_y;
+                        (xa.min(xb), xa.max(xb))
+                    };
+                    let first = row * grid.nx + grid.col(x_lo - max_tol);
+                    let last = row * grid.nx + grid.col(x_hi + max_tol);
+                    let k_end = arena.vgrid_start[last + 1] as usize;
+                    for k in (arena.vgrid_start[first] as usize)..k_end {
+                        let GridVertex { x: px, y: py, id: v_id } = arena.grid_verts[k];
+                        let qx = px - ax;
+                        let qy = py - ay;
+                        let cross = qx * dy - qy * dx;
+                        if cross * cross > max_cross_sq {
+                            continue;
+                        }
+                        // Projection test before any per-vertex lookups: it rejects the edge's own
+                        // endpoints (always in its cells and on its line) from coordinates alone.
+                        let dot = qx * dx + qy * dy;
+                        if dot <= 0.0 || dot >= len_sq {
+                            continue;
+                        }
+                        let vu = v_id as usize;
+                        if v_id == u || v_id == v {
+                            continue;
+                        }
+                        if !edge_dirty && arena.vert_step_stamp[vu] != step_stamp {
+                            continue;
+                        }
+                        let tol = arena.vr[vu] + initial_vertex_radius;
+                        if cross * cross > (tol * tol) * len_sq {
+                            continue;
+                        }
+                        let t = dot * inv_len_sq;
+                        if t > 0.0 && t < 1.0 {
+                            record_split(arena, edge_id, t, v_id);
+                        }
                     }
                 }
             }
         }
 
-        if apply_edge_splits(arena, body_count, true) {
+        if apply_edge_splits(arena, body_count, false) {
             iter_changed = true;
             drain_zero_strata(arena, r_max, body_count);
+            // Edges changed by these splits and merges also get crossing-checked below, but stay
+            // queued (with any moved vertices) so the next step re-checks them for vertex-on-edge.
             for i in 0..arena.step_e_queue.len() {
                 let e_id = arena.step_e_queue[i];
                 let eu = e_id as usize;
-                arena.in_step_e_queue[eu] = 0;
                 if arena.e_alive[eu] != 0 {
                     arena.edge_crossing_stamp[eu] = step_stamp;
                     arena.dirty_edges.push(e_id);
@@ -1226,12 +1325,6 @@ pub fn consolidate_prepared(arena: &mut KernelArena) {
                     }
                 }
             }
-            arena.step_e_queue.clear();
-            for i in 0..arena.step_v_queue.len() {
-                let v_id = arena.step_v_queue[i] as usize;
-                arena.in_step_v_queue[v_id] = 0;
-            }
-            arena.step_v_queue.clear();
             active_edge_count = if iter == 0 {
                 build_sorted_active_edges(arena)
             } else {
@@ -1248,7 +1341,7 @@ pub fn consolidate_prepared(arena: &mut KernelArena) {
             if iter > 0 {
                 for &de in &arena.dirty_edges {
                     let deu = de as usize;
-                    if arena.e_alive[deu] == 0 {
+                    if arena.e_alive[deu] == 0 || arena.e_crossing_piece[deu] != 0 {
                         continue;
                     }
                     de_min_x = de_min_x.min(arena.e_min_x[deu]);
@@ -1264,7 +1357,7 @@ pub fn consolidate_prepared(arena: &mut KernelArena) {
                 if arena.e_alive[e1u] == 0 {
                     continue;
                 }
-                let e1_dirty = iter == 0 || arena.edge_crossing_stamp[e1u] == step_stamp;
+                let e1_dirty = iter == 0 || (arena.edge_crossing_stamp[e1u] == step_stamp && arena.e_crossing_piece[e1u] == 0);
                 if !e1_dirty {
                     if arena.e_min_x[e1u] - r0 > de_max_x {
                         break;
@@ -1306,7 +1399,7 @@ pub fn consolidate_prepared(arena: &mut KernelArena) {
                     }
                     if !e1_dirty {
                         let e2u = unsafe { *arena.sorted_edges.get_unchecked(j) } as usize;
-                        if arena.edge_crossing_stamp[e2u] != step_stamp {
+                        if arena.edge_crossing_stamp[e2u] != step_stamp || arena.e_crossing_piece[e2u] != 0 {
                             continue;
                         }
                     }
@@ -1342,7 +1435,7 @@ pub fn consolidate_prepared(arena: &mut KernelArena) {
                 }
             }
 
-            if apply_edge_splits(arena, body_count, false) {
+            if apply_edge_splits(arena, body_count, true) {
                 iter_changed = true;
             }
         }

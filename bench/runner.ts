@@ -45,6 +45,12 @@ export interface FullBenchmarkReport {
 
 const ALL_OPS: BenchOp[] = ["union", "intersect", "difference", "xor"];
 
+/**
+ * Shortest timed sample. Browsers coarsen `performance.now()` (to 0.1 ms on pages that are not
+ * cross-origin isolated), so each sample repeats the 4 operations enough times to span many ticks.
+ */
+const MIN_SAMPLE_MS = 2;
+
 function totalLoopArea(loops: Loop2D[]): number {
   let a = 0;
   for (const l of loops) a += signedLoopArea(l);
@@ -85,7 +91,20 @@ function measureWorkloadForLibrary(
       }
     }
 
-    // Timed iterations (each sample runs all 4 Boolean operations: union, intersect, difference, xor)
+    // Rounds (all 4 Boolean operations each) per sample, doubled until a sample spans MIN_SAMPLE_MS
+    let rounds = 1;
+    for (;;) {
+      const t0 = performance.now();
+      for (let r = 0; r < rounds; r++) {
+        for (const op of ALL_OPS) {
+          task.run(op);
+        }
+      }
+      if (performance.now() - t0 >= MIN_SAMPLE_MS) break;
+      rounds *= 2;
+    }
+
+    // Timed samples, each reporting the mean time of one operation across its rounds
     const sampleTimesMs: number[] = [];
     const startWall = performance.now();
 
@@ -94,11 +113,12 @@ function measureWorkloadForLibrary(
       sampleTimesMs.length < 2
     ) {
       const t0 = performance.now();
-      for (const op of ALL_OPS) {
-        task.run(op);
+      for (let r = 0; r < rounds; r++) {
+        for (const op of ALL_OPS) {
+          task.run(op);
+        }
       }
-      const dt = (performance.now() - t0) / ALL_OPS.length;
-      sampleTimesMs.push(dt);
+      sampleTimesMs.push((performance.now() - t0) / (rounds * ALL_OPS.length));
     }
 
     task.dispose?.();

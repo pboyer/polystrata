@@ -155,7 +155,7 @@ export const LIBRARY_ADAPTERS: LibraryAdapter[] = [
   {
     id: "polystrata",
     name: "polystrata",
-    version: "0.1.0",
+    version: "0.1.1",
     algorithm: "4-Stage Snapped B-Rep + 1D Sweep + Rust/WASM SIMD",
     prepare: (subject, clip) => {
       const wasmTask = prepareBooleanTask(subject, clip);

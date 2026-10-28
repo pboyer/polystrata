@@ -1128,12 +1128,12 @@ pub extern "C" fn wasm_get_prep_diagonal() -> f64 {
 
 #[no_mangle]
 pub extern "C" fn wasm_get_prep_r0() -> f64 {
-    with_arena(|arena| arena.prep_r0)
+    with_arena(|arena| arena.prep_r0 * arena.prep_inv_scale)
 }
 
 #[no_mangle]
 pub extern "C" fn wasm_get_prep_rmax() -> f64 {
-    with_arena(|arena| arena.prep_rmax)
+    with_arena(|arena| arena.prep_rmax * arena.prep_inv_scale)
 }
 
 #[no_mangle]
@@ -1275,5 +1275,38 @@ mod tests {
         );
         assert_eq!(multi.len(), 1);
         assert_eq!(multi[0].len(), 2); // 1 outer shell + 1 hole
+    }
+
+    #[test]
+    fn test_non_finite_vertices_are_dropped() {
+        let inner = [[0.2, 0.2], [0.8, 0.2], [0.8, 0.8], [0.2, 0.8]];
+        let with_inf = [[0.0, 0.0], [f64::INFINITY, 1.0], [1.0, 1.0]];
+        let with_nan = [[0.0, 0.0], [f64::NAN, 1.0], [1.0, 1.0]];
+        for bad in [&with_inf, &with_nan] {
+            let u = union(bad, &inner, KernelOptions::default());
+            assert!((u.total_area - 0.36).abs() < 1e-12);
+        }
+        // A body whose segments are all dropped still counts for N-ary predicates.
+        let all_bad = vec![[f64::NAN, 0.0], [f64::INFINITY, 1.0], [1.0, f64::NEG_INFINITY]];
+        let i_all = intersect_all(&[inner.to_vec(), all_bad], KernelOptions::default());
+        assert!(i_all.polygons.is_empty());
+    }
+
+    #[test]
+    fn test_overflow_scale_inputs_are_rescaled() {
+        for s in [1e154, 1e200, 1e300] {
+            let a = [[0.0, 0.0], [s, 0.0], [s, s], [0.0, s]];
+            let b = [[0.1 * s, 0.1 * s], [2.0 * s, 0.1 * s], [2.0 * s, 2.0 * s], [0.1 * s, 2.0 * s]];
+            let i = intersect(&a, &b, KernelOptions::default());
+            assert_eq!(i.polygons.len(), 1);
+            // Measure in units of `s`: the raw area (~1e600 at s = 1e300) is not representable.
+            let unit_loop: Loop2D = i.polygons[0]
+                .outer
+                .iter()
+                .map(|p| Point2D { x: p.x / s, y: p.y / s })
+                .collect();
+            let loop_area = signed_loop_area(&unit_loop);
+            assert!((loop_area - 0.81).abs() < 1e-9, "s = {s}: area {loop_area}");
+        }
     }
 }

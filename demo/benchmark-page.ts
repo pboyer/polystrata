@@ -24,6 +24,11 @@ const workloadTbody = document.getElementById("workload-tbody")!;
 const btnRunAll = document.getElementById("btn-run-all") as HTMLButtonElement;
 const btnRunQuick = document.getElementById("btn-run-quick") as HTMLButtonElement;
 
+/** Milliseconds with 3 decimals, or 3 significant digits below 1 ms (sub-microsecond ops). */
+function formatMs(ms: number): string {
+  return ms >= 1 ? ms.toFixed(3) : ms.toPrecision(3);
+}
+
 function renderReport2D(report: FullBenchmarkReport): void {
   cardsEl.innerHTML = "";
   for (const lib of LIBRARY_ADAPTERS) {
@@ -101,15 +106,15 @@ function renderReport2D(report: FullBenchmarkReport): void {
       const tr = document.createElement("tr");
       tr.innerHTML = `
         <td><strong style="color: ${color}">${r.libraryName}</strong></td>
-        <td class="num">${r.opsPerSec > 0 ? Math.round(r.opsPerSec).toLocaleString() : "ERR"}</td>
+        <td class="num">${r.errorMessage ? "ERR" : Math.round(r.opsPerSec).toLocaleString()}</td>
         <td class="bar-cell">
           <div class="bar-track">
             <div class="bar-fill" style="width: ${pct.toFixed(1)}%; background: ${color};"></div>
           </div>
         </td>
-        <td class="num">${Number.isFinite(r.meanMs) ? r.meanMs.toFixed(3) : "—"}</td>
-        <td class="num">${Number.isFinite(r.p50Ms) ? r.p50Ms.toFixed(3) : "—"}</td>
-        <td class="num">${Number.isFinite(r.p95Ms) ? r.p95Ms.toFixed(3) : "—"}</td>
+        <td class="num">${Number.isFinite(r.meanMs) ? formatMs(r.meanMs) : "—"}</td>
+        <td class="num">${Number.isFinite(r.p50Ms) ? formatMs(r.p50Ms) : "—"}</td>
+        <td class="num">${Number.isFinite(r.p95Ms) ? formatMs(r.p95Ms) : "—"}</td>
         <td class="num">${Number.isFinite(r.areaIdentityError) ? r.areaIdentityError.toExponential(1) : "NaN"}</td>
         <td>${statusBadge}</td>
       `;

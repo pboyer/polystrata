@@ -8,6 +8,11 @@ function pad(str: string, width: number, rightAlign = false): string {
   return rightAlign ? spaces + str : str + spaces;
 }
 
+/** Milliseconds with 3 decimals, or 3 significant digits below 1 ms (sub-microsecond ops). */
+function formatMs(ms: number): string {
+  return ms >= 1 ? ms.toFixed(3) : ms.toPrecision(3);
+}
+
 function logProgress(msg: string): void {
   if (process.stderr.isTTY) {
     process.stderr.write(`\r${msg.padEnd(76)}`);
@@ -59,10 +64,10 @@ async function main(): Promise<void> {
     );
 
     for (const r of summary.results) {
-      const opsStr = r.opsPerSec > 0 ? Math.round(r.opsPerSec).toLocaleString() : "ERR";
-      const meanStr = Number.isFinite(r.meanMs) ? r.meanMs.toFixed(3) : "ERR";
-      const p50Str = Number.isFinite(r.p50Ms) ? r.p50Ms.toFixed(3) : "ERR";
-      const p95Str = Number.isFinite(r.p95Ms) ? r.p95Ms.toFixed(3) : "ERR";
+      const opsStr = r.errorMessage ? "ERR" : Math.round(r.opsPerSec).toLocaleString();
+      const meanStr = Number.isFinite(r.meanMs) ? formatMs(r.meanMs) : "ERR";
+      const p50Str = Number.isFinite(r.p50Ms) ? formatMs(r.p50Ms) : "ERR";
+      const p95Str = Number.isFinite(r.p95Ms) ? formatMs(r.p95Ms) : "ERR";
       const errStr = Number.isFinite(r.areaIdentityError)
         ? r.areaIdentityError.toExponential(1)
         : "NaN";
